@@ -574,10 +574,23 @@
         <div style="display:flex;gap:8px;margin-bottom:8px">
           <input id="newUsername" placeholder="Username" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-size:13px;outline:none">
           <input id="newPassword" type="password" placeholder="Password (min 6 chars)" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-size:13px;outline:none">
+
         </div>
         <button onclick="addUser()" style="padding:7px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer">Add User</button>
         <span id="userAddError" style="color:var(--danger);font-size:12px;margin-left:10px"></span>
       </div>
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Agent API Key</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <code id="agentKeyDisplay" style="flex:1;background:var(--bg);border:1px solid var(--border);padding:7px 10px;border-radius:4px;font-size:11px;color:var(--muted);font-family:var(--mono);word-break:break-all">click "Show Key" to reveal</code>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button onclick="loadAgentKey()" style="padding:7px 12px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:4px;font-size:12px;cursor:pointer">Show Key</button>
+          <button onclick="generateAgentKey()" style="padding:7px 12px;background:var(--danger);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer">Regenerate Key</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">Save this key to <code>C:\ProgramData\ChocoAgentgent.key</code> on each managed machine.</div>
+      </div>
+
       <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
         <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Change My Password</div>
         <div style="display:flex;gap:8px;margin-bottom:8px">
@@ -1423,12 +1436,20 @@ async function loadUsers() {
   const list = await res.json();
   const el   = document.getElementById('usersList');
   if (!list.length) { el.innerHTML = '<div style="color:var(--muted);font-size:12px">No users yet.</div>'; return; }
-  el.innerHTML = list.map(u =>
-    '<div class="user-row">' +
-      '<span>' + u.username + '</span>' +
-      '<button onclick="deleteUser(' + u.id + ', this)" style="padding:3px 8px;font-size:10px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer">Remove</button>' +
-    '</div>'
-  ).join('');
+  el.innerHTML = '';
+  list.forEach(function(u) {
+    var row = document.createElement('div');
+    row.className = 'user-row';
+    var name = document.createElement('span');
+    name.textContent = u.username;
+    var btn = document.createElement('button');
+    btn.textContent = 'Remove';
+    btn.style.cssText = 'padding:3px 8px;font-size:10px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer';
+    btn.addEventListener('click', (function(id) { return function() { deleteUser(id); }; })(u.id));
+    row.appendChild(name);
+    row.appendChild(btn);
+    el.appendChild(row);
+  });
 }
 
 async function addUser() {
@@ -1612,6 +1633,23 @@ function filterToComputer(hostname) {
   renderComputerList();
   renderSoftwareList();
   updateDashboard();
+}
+
+
+async function loadAgentKey() {
+  const res  = await fetch('/api/auth/agent-key');
+  const data = await res.json();
+  document.getElementById('agentKeyDisplay').textContent = data.key || data.message || 'No key set';
+}
+
+async function generateAgentKey() {
+  if (!confirm('Regenerate agent key? All agents will fail to connect until you deploy the new key.')) return;
+  const res  = await fetch('/api/auth/generate-agent-key', {method: 'POST'});
+  const data = await res.json();
+  if (res.ok) {
+    document.getElementById('agentKeyDisplay').textContent = data.key;
+    alert('New key generated. Save it to C:\\ProgramData\\ChocoAgent\\agent.key on each machine.');
+  }
 }
 
 </script>
