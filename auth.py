@@ -53,10 +53,12 @@ def init_auth(app):
         path = request.path
         if path.startswith('/api/auth/') or path.startswith('/static/'):
             return None
+        # Agent paths: accept either a valid agent key OR a valid session
         if is_agent_path(path):
-            if not verify_agent_key(request):
-                return jsonify({'error': 'Invalid or missing agent API key'}), 401
-            return None
+            if verify_agent_key(request) or 'user_id' in session:
+                return None
+            return jsonify({'error': 'Invalid or missing agent API key'}), 401
+        # All other API paths: require session
         if 'user_id' not in session:
             if path.startswith('/api/'):
                 return jsonify({'error': 'Unauthorized'}), 401
