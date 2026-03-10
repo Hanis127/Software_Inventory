@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+.env
 agent.spec
 agent_backup.py
 agent_new_backup.py
