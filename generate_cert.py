@@ -6,7 +6,7 @@ Output: cert.pem and key.pem in the same directory as your Flask app.
 from OpenSSL import crypto
 import os
 
-CERT_FILE = "cert.pem"
+CERT_FILE = "server_cert.pem"
 KEY_FILE  = "key.pem"
 
 def generate_self_signed_cert():

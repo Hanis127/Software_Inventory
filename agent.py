@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SERVER_URL       = "https://YOUR_IP:5000"
+SERVER_URL       = "https://YOUR_SERVER_IP:5000"
 COLLECT_INTERVAL = 600   # 10 minutes
 POLL_INTERVAL    = 60    # job polling in seconds
 LOG_PATH         = r"C:\ProgramData\ChocoAgent\agent.log"
@@ -44,10 +44,31 @@ def api_post(path, data):
     with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
         return json.loads(r.read())
 
-# SSL context that skips verification for self-signed cert
-_ssl_ctx = ssl.create_default_context()
-_ssl_ctx.check_hostname = False
-_ssl_ctx.verify_mode = ssl.CERT_NONE
+# SSL context that pins trust to the specific server certificate.
+# Place server_cert.pem (copy of cert.pem from the Flask server) alongside agent.exe.
+# This is more secure than a CA-signed cert for internal use — the agent will only
+# talk to a server presenting exactly this certificate.
+def _build_ssl_context():
+    cert_candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "server_cert.pem"),
+        r"C:\ProgramData\ChocoAgent\server_cert.pem",
+    ]
+    for cert_path in cert_candidates:
+        if os.path.exists(cert_path):
+            ctx = ssl.create_default_context()
+            ctx.load_verify_locations(cert_path)
+            log(f"SSL: pinned to cert at {cert_path}")
+            return ctx
+    # Fallback: no cert found — warn loudly but continue with verification disabled
+    # Deploy server_cert.pem alongside agent.exe to fix this
+    log("WARNING: server_cert.pem not found — SSL certificate verification is DISABLED. "
+        "Copy cert.pem from the Flask server to server_cert.pem alongside agent.exe.")
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+_ssl_ctx = None  # initialized in main() after logging is set up
 
 def api_get(path):
     req = urllib.request.Request(f"{SERVER_URL}{path}")
@@ -388,6 +409,8 @@ def poll_jobs():
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 def main():
+    global _ssl_ctx
+    _ssl_ctx = _build_ssl_context()
     log(f"Agent starting on {socket.gethostname()}")
     last_collect = 0
     config       = {}
