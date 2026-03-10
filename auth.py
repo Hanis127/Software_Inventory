@@ -24,7 +24,7 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         # Allow agent endpoints without auth (they use internal HTTP or have no session)
-        agent_paths = ['/api/inventory', '/api/jobs/pending/', '/api/jobs/']
+        agent_paths = ['/api/inventory', '/api/jobs/pending/', '/api/jobs/', '/api/config']
         path = request.path
         if any(path.startswith(p) for p in agent_paths) and request.method in ('POST', 'PATCH', 'GET'):
             # Check if it's a browser request (has Accept: text/html) or agent request
@@ -44,7 +44,7 @@ def init_auth(app):
         if any(request.path.startswith(p) for p in public):
             return None
         # Agent paths - no session needed (machine-to-machine)
-        agent_paths = ['/api/inventory', '/api/jobs/pending', '/api/jobs/']
+        agent_paths = ['/api/inventory', '/api/jobs/pending', '/api/jobs/', '/api/config']
         if any(request.path.startswith(p) for p in agent_paths):
             if 'text/html' not in request.headers.get('Accept', ''):
                 return None
