@@ -1,0 +1,1619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Software Inventory</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0f1117;
+    --surface:   #181c25;
+    --border:    #262b38;
+    --accent:    #00d4aa;
+    --accent2:   #3b82f6;
+    --danger:    #ef4444;
+    --warn:      #f59e0b;
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --online:    #22c55e;
+    --offline:   #ef4444;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  th { cursor: pointer; }
+  th.sorted-asc::after  { content: " ▲"; color: var(--accent); }
+  th.sorted-desc::after { content: " ▼"; color: var(--accent); }
+  body { font-family: var(--sans); background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; font-size: 13px; }
+  .sidebar { width: 260px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-header { padding: 20px 16px 12px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h1 { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; }
+  .sidebar-header p { font-size: 11px; color: var(--muted); margin-top: 3px; font-family: var(--mono); }
+  .sidebar-section { padding: 12px 16px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .sidebar-section h3 { font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 8px; font-family: var(--mono); }
+  .search-input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; font-size: 12px; font-family: var(--sans); border-radius: 4px; margin-bottom: 8px; outline: none; transition: border-color 0.15s; }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--muted); }
+  .list-scroll { overflow-y: auto; max-height: 180px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); }
+  .list-item { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.1s; user-select: none; }
+  .list-item:last-child { border-bottom: none; }
+  .list-item:hover { background: var(--border); }
+  .list-item.selected { background: rgba(0,212,170,0.08); }
+  .list-item.selected .item-name { color: var(--accent); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+  .dot-online  { background: var(--online); box-shadow: 0 0 6px var(--online); }
+  .dot-offline { background: var(--offline); }
+  .item-name { font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .btn-row { display: flex; gap: 6px; margin-top: 8px; }
+  .btn { flex: 1; padding: 5px 0; font-size: 11px; font-family: var(--mono); background: var(--border); color: var(--muted); border: 1px solid var(--border); border-radius: 3px; cursor: pointer; transition: all 0.15s; text-align: center; }
+  .btn:hover { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  .topbar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+  .topbar-search { flex: 1; max-width: 320px; }
+  .topbar-search input { width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 7px 12px; font-size: 12px; font-family: var(--sans); border-radius: 4px; outline: none; transition: border-color 0.15s; }
+  .topbar-search input:focus { border-color: var(--accent); }
+  .topbar-search input::placeholder { color: var(--muted); }
+  .topbar select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; font-size: 12px; font-family: var(--sans); border-radius: 4px; outline: none; cursor: pointer; }
+  .refresh-btn { padding: 7px 14px; background: transparent; border: 1px solid var(--accent); color: var(--accent); font-size: 11px; font-family: var(--mono); border-radius: 4px; cursor: pointer; letter-spacing: 0.05em; transition: all 0.15s; margin-left: auto; }
+  .refresh-btn:hover { background: var(--accent); color: var(--bg); }
+  .last-refresh { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+  .content { flex: 1; overflow-y: auto; padding: 20px; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; margin-bottom: 16px; overflow: hidden; }
+  .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; cursor: pointer; user-select: none; transition: background 0.1s; }
+  .panel-header:hover { background: var(--border); }
+  .panel-title { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--text); letter-spacing: 0.06em; text-transform: uppercase; display: flex; align-items: center; gap: 10px; }
+  .panel-badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; font-family: var(--mono); }
+  .badge-warn { background: rgba(245,158,11,0.15); color: var(--warn); border: 1px solid rgba(245,158,11,0.3); }
+  .badge-info { background: rgba(59,130,246,0.15); color: var(--accent2); border: 1px solid rgba(59,130,246,0.3); }
+  .badge-ok   { background: rgba(34,197,94,0.15);  color: var(--online); border: 1px solid rgba(34,197,94,0.3); }
+  .badge-internal { background: rgba(168,85,247,0.15); color: #a855f7; border: 1px solid rgba(168,85,247,0.3); }
+  .panel-toggle { font-family: var(--mono); font-size: 14px; color: var(--muted); transition: transform 0.2s; }
+  .panel-toggle.open { transform: rotate(90deg); }
+  .panel-body { display: none; padding: 16px; border-top: 1px solid var(--border); }
+  .panel-body.open { display: block; }
+  .stats-row { display: flex; gap: 12px; margin-bottom: 16px; }
+  .stat-card { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 12px 16px; }
+  .stat-label { font-size: 10px; color: var(--muted); font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .stat-value { font-size: 22px; font-family: var(--mono); font-weight: 600; color: var(--text); }
+  .stat-value.warn { color: var(--warn); }
+  .stat-value.ok   { color: var(--online); }
+  #chart { max-height: 280px; }
+  #softwareListTable { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 16px; }
+  #softwareListTable th { text-align: left; padding: 6px 10px; font-family: var(--mono); font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+  #softwareListTable td { padding: 5px 10px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 11px; }
+  #softwareListTable tr:hover td { background: var(--border); }
+  #softwareListTable tr.sw-expanded td { background: var(--border); }
+  #softwareListTable tr.sw-computers-row td { background: var(--bg); }
+  #softwareListTable tr.sw-computers-row:hover td { background: var(--bg); }
+  #softwareListTable .pill-small { font-size: 9px; padding: 1px 6px; border-radius: 10px; font-family: var(--mono); }
+  #softwareListTable .pill-outdated-sm { background: rgba(239,68,68,0.15); color: var(--danger); }
+  #softwareListTable .pill-ok-sm { background: rgba(0,212,170,0.1); color: var(--accent); }
+  #softwareListTable .pill-unknown-sm { background: rgba(100,116,139,0.15); color: var(--muted); }
+  .sw-list-controls { display: flex; gap: 8px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  .sw-list-controls input { flex: 1; min-width: 160px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 5px 10px; border-radius: 4px; font-size: 12px; font-family: var(--mono); outline: none; }
+  .sw-list-controls input:focus { border-color: var(--accent); }
+  .sw-list-controls select { background: var(--bg); border: 1px solid var(--border); color: var(--muted); padding: 5px 8px; border-radius: 4px; font-size: 11px; font-family: var(--mono); outline: none; cursor: pointer; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead th { background: var(--bg); color: var(--muted); font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); position: sticky; top: 0; white-space: nowrap; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+  tbody tr.outdated { background: rgba(239,68,68,0.04); }
+  td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
+  .td-name { color: var(--accent2); cursor: pointer; font-weight: 500; }
+  .td-name:hover { text-decoration: underline; }
+  .status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-family: var(--mono); font-weight: 600; }
+  .pill-outdated { background: rgba(239,68,68,0.15);  color: var(--danger); border: 1px solid rgba(239,68,68,0.3); }
+  .pill-uptodate { background: rgba(34,197,94,0.12);  color: var(--online); border: 1px solid rgba(34,197,94,0.25); }
+  .pill-unknown  { background: rgba(100,116,139,0.15); color: var(--muted);  border: 1px solid rgba(100,116,139,0.3); }
+  .pill-source   { opacity: 0.65; font-size: 9px; font-weight: 400; }
+  .computer-pill { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 11px; font-family: var(--mono); background: var(--border); color: var(--muted); }
+  .update-btn { padding: 3px 10px; font-size: 10px; font-family: var(--mono); background: transparent; border: 1px solid var(--accent); color: var(--accent); border-radius: 3px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .update-btn:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+  .update-btn:disabled { opacity: 0.5; cursor: default; }
+  .update-btn.running { border-color: var(--warn); color: var(--warn); }
+  .update-btn.done    { border-color: var(--online); color: var(--online); background: rgba(34,197,94,0.08); }
+  .update-btn.failed  { border-color: var(--danger); color: var(--danger); background: rgba(239,68,68,0.08); }
+  .uninstall-btn { padding: 3px 10px; font-size: 10px; font-family: var(--mono); background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 3px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .uninstall-btn:hover:not(:disabled) { background: var(--danger); color: var(--bg); }
+  .uninstall-btn:disabled { opacity: 0.5; cursor: default; }
+  .uninstall-btn.running { border-color: var(--warn); color: var(--warn); }
+  .uninstall-btn.done    { border-color: var(--online); color: var(--online); }
+  .uninstall-btn.failed  { border-color: var(--danger); color: var(--danger); }
+  .job-row-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-family: var(--mono); }
+  .job-pending { background: rgba(100,116,139,0.2); color: var(--muted); }
+  .job-running { background: rgba(245,158,11,0.15); color: var(--warn); }
+  .job-done    { background: rgba(34,197,94,0.15);  color: var(--online); }
+  .job-failed  { background: rgba(239,68,68,0.15);  color: var(--danger); }
+  .job-output-btn { font-size: 10px; font-family: var(--mono); background: none; border: 1px solid var(--border); color: var(--muted); padding: 2px 7px; border-radius: 3px; cursor: pointer; }
+  .job-output-btn:hover { border-color: var(--muted); color: var(--text); }
+
+  /* ── Deploy panel ── */
+  .deploy-tabs { display: flex; gap: 0; margin-bottom: 16px; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+  .deploy-tab { flex: 1; padding: 7px 0; text-align: center; font-size: 11px; font-family: var(--mono); color: var(--muted); background: var(--bg); cursor: pointer; transition: all 0.15s; border: none; }
+  .deploy-tab.active { background: var(--accent); color: var(--bg); font-weight: 600; }
+  .deploy-tab:not(.active):hover { background: var(--border); color: var(--text); }
+  .deploy-section { display: none; }
+  .deploy-section.active { display: block; }
+  .deploy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .deploy-col h4 { font-size: 10px; font-family: var(--mono); color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+  .deploy-pkg-list { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 220px; overflow-y: auto; }
+  .deploy-pkg-item { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; }
+  .deploy-pkg-item:last-child { border-bottom: none; }
+  .deploy-pkg-item:hover { background: var(--border); }
+  .deploy-pkg-item.selected { background: rgba(0,212,170,0.08); }
+  .deploy-pkg-item.selected .deploy-pkg-name { color: var(--accent); }
+  .deploy-pkg-name { font-size: 12px; font-weight: 500; }
+  .deploy-pkg-id { font-size: 10px; font-family: var(--mono); color: var(--muted); }
+  .deploy-computer-list { border: 1px solid var(--border); border-radius: 4px; background: var(--bg); max-height: 220px; overflow-y: auto; }
+  .deploy-computer-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.1s; user-select: none; }
+  .deploy-computer-item:last-child { border-bottom: none; }
+  .deploy-computer-item:hover { background: var(--border); }
+  .deploy-computer-item.selected { background: rgba(0,212,170,0.08); }
+  .deploy-computer-item.selected .item-name { color: var(--accent); }
+  .deploy-footer { margin-top: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .deploy-btn { padding: 7px 20px; font-size: 11px; font-family: var(--mono); background: var(--accent); color: var(--bg); border: none; border-radius: 4px; cursor: pointer; font-weight: 600; letter-spacing: 0.05em; transition: all 0.15s; }
+  .deploy-btn:hover:not(:disabled) { opacity: 0.85; }
+  .deploy-btn:disabled { opacity: 0.4; cursor: default; }
+  .deploy-btn.danger { background: var(--danger); }
+  .deploy-status { font-size: 11px; font-family: var(--mono); color: var(--muted); }
+  .deploy-progress { margin-top: 12px; display: none; }
+  .deploy-progress.visible { display: block; }
+  .progress-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 11px; font-family: var(--mono); border-bottom: 1px solid var(--border); }
+  .progress-item:last-child { border-bottom: none; }
+  .progress-hostname { color: var(--muted); width: 160px; flex-shrink: 0; }
+  .progress-status { }
+
+  /* add internal package form */
+  .add-pkg-form { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .add-pkg-form input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; font-size: 12px; font-family: var(--sans); border-radius: 4px; outline: none; transition: border-color 0.15s; }
+  .add-pkg-form input:focus { border-color: var(--accent); }
+  .add-pkg-form input::placeholder { color: var(--muted); }
+  .add-pkg-form input.wide { flex: 1; min-width: 140px; }
+  .add-pkg-btn { padding: 6px 14px; font-size: 11px; font-family: var(--mono); background: var(--accent); color: var(--bg); border: none; border-radius: 4px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+  .add-pkg-btn:hover { opacity: 0.85; }
+  .delete-pkg-btn { padding: 2px 8px; font-size: 10px; font-family: var(--mono); background: transparent; border: 1px solid var(--danger); color: var(--danger); border-radius: 3px; cursor: pointer; transition: all 0.15s; }
+  .delete-pkg-btn:hover { background: var(--danger); color: var(--bg); }
+
+  /* community package search */
+  .community-search-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  .community-search-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; font-size: 12px; font-family: var(--sans); border-radius: 4px; outline: none; transition: border-color 0.15s; }
+  .community-search-row input:focus { border-color: var(--accent); }
+  .community-search-row input::placeholder { color: var(--muted); }
+
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; width: 600px; max-width: 90vw; max-height: 70vh; display: flex; flex-direction: column; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .modal-title { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; }
+  .modal-close { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; line-height: 1; padding: 0 4px; }
+  .modal-close:hover { color: var(--text); }
+  .modal-body { flex: 1; overflow-y: auto; padding: 14px 18px; }
+  .modal-body pre { font-family: var(--mono); font-size: 11px; color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+  .loading { display: flex; align-items: center; gap: 8px; color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 20px 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+  .empty { color: var(--muted); font-family: var(--mono); font-size: 12px; padding: 20px 0; text-align: center; }
+
+  /* ── Login overlay ─────────────────────────────────────────────────────── */
+  #loginOverlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+  }
+  #loginOverlay.active { display: flex; }
+  .login-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 40px 48px;
+    width: 360px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  }
+  .login-box h2 {
+    margin: 0 0 8px;
+    font-size: 20px;
+    color: var(--text);
+  }
+  .login-box p {
+    margin: 0 0 28px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .login-field {
+    margin-bottom: 16px;
+  }
+  .login-field label {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .login-field input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .login-field input:focus { border-color: var(--accent); }
+  .login-submit {
+    width: 100%;
+    padding: 10px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: opacity 0.15s;
+  }
+  .login-submit:hover { opacity: 0.85; }
+  .login-error {
+    color: var(--danger);
+    font-size: 12px;
+    margin-top: 10px;
+    text-align: center;
+    min-height: 18px;
+  }
+  /* ── User menu ─────────────────────────────────────────────────────────── */
+  #userMenu {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+  }
+  #userMenu span {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .logout-btn {
+    padding: 4px 10px;
+    font-size: 11px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .logout-btn:hover { border-color: var(--danger); color: var(--danger); }
+  /* ── Users panel ────────────────────────────────────────────────────────── */
+  #usersPanel { display: none; }
+  .user-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+</style>
+</head>
+<body>
+<!-- Login Overlay -->
+<div id="loginOverlay" class="active">
+  <div class="login-box">
+    <h2>Software Inventory</h2>
+    <p>Sign in to continue</p>
+    <div class="login-field">
+      <label>Username</label>
+      <input type="text" id="loginUser" autocomplete="username" />
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="loginPass" autocomplete="current-password" />
+    </div>
+    <button class="login-submit" onclick="doLogin()">Sign In</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>SW Inventory</h1>
+    <p id="sidebarMeta">Loading...</p>
+    <div id="userMenu" style="display:none;margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span id="userMenuName" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+      <button class="logout-btn" onclick="showUsersPanel()" style="font-size:10px">Users</button>
+      <button class="logout-btn" onclick="doLogout()" style="font-size:10px">Sign out</button>
+    </div>
+  </div>
+  <div class="sidebar-section">
+    <h3>Computers</h3>
+    <input class="search-input" id="computerSearch" placeholder="Filter computers...">
+    <div class="list-scroll" id="computerList"></div>
+    <div class="btn-row">
+      <button class="btn" onclick="selectAllComputers()">All</button>
+      <button class="btn" onclick="clearComputers()">Clear</button>
+    </div>
+  </div>
+  <div class="sidebar-section" style="flex:1; overflow:hidden; display:flex; flex-direction:column;">
+    <h3>Software</h3>
+    <input class="search-input" id="softwareSearchSidebar" placeholder="Filter software...">
+    <div class="list-scroll" style="flex:1; max-height:none;" id="softwareList"></div>
+    <div class="btn-row">
+      <button class="btn" onclick="selectAllSoftware()">All</button>
+      <button class="btn" onclick="clearSoftware()">Clear</button>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-search">
+      <input id="softwareSearch" placeholder="Search software..." oninput="updateDashboard()">
+    </div>
+    <select id="groupBy" onchange="updateDashboard()">
+      <option value="display_name">Group by Software</option>
+      <option value="publisher">Group by Publisher</option>
+    </select>
+    <span class="last-refresh" id="lastRefresh">Never refreshed</span>
+    <button class="refresh-btn" onclick="loadAll()">&#8635; Refresh</button>
+  </div>
+
+  <div class="content">
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">Total Computers</div><div class="stat-value" id="statComputers">&#8212;</div></div>
+      <div class="stat-card"><div class="stat-label">Online</div><div class="stat-value ok" id="statOnline">&#8212;</div></div>
+      <div class="stat-card"><div class="stat-label">Total Packages</div><div class="stat-value" id="statPackages">&#8212;</div></div>
+      <div class="stat-card"><div class="stat-label">Outdated</div><div class="stat-value warn" id="statOutdated">&#8212;</div></div>
+    </div>
+
+    <!-- ── Deploy Panel ── -->
+    <div class="panel">
+      <div class="panel-header" onclick="togglePanel(this)">
+        <div class="panel-title">
+          Deploy Software
+          <span class="panel-badge badge-internal" id="internalBadge">0 internal</span>
+        </div>
+        <span class="panel-toggle">&#9658;</span>
+      </div>
+      <div class="panel-body" id="deployPanelBody">
+
+        <div class="deploy-tabs">
+          <button class="deploy-tab active" onclick="switchDeployTab('internal', this)">Internal Packages</button>
+          <button class="deploy-tab" onclick="switchDeployTab('community', this)">Community (Chocolatey)</button>
+        </div>
+
+        <!-- Internal tab -->
+        <div class="deploy-section active" id="deployInternal">
+          <div class="add-pkg-form">
+            <input class="wide" id="newPkgId" placeholder="choco_id (e.g. attendancesoftware)">
+            <input class="wide" id="newPkgName" placeholder="Display name">
+            <input style="width:200px" id="newPkgDesc" placeholder="Description (optional)">
+            <button class="add-pkg-btn" onclick="addInternalPackage()">+ Add</button>
+          </div>
+
+          <div class="deploy-grid">
+            <div class="deploy-col">
+              <h4>Select Package</h4>
+              <div class="deploy-pkg-list" id="internalPkgList">
+                <div class="empty">No internal packages yet</div>
+              </div>
+            </div>
+            <div class="deploy-col">
+              <h4>Target Computers</h4>
+              <div class="btn-row" style="margin-bottom:8px">
+                <button class="btn" onclick="deploySelectAll()">All</button>
+                <button class="btn" onclick="deploySelectOnline()">Online only</button>
+                <button class="btn" onclick="deploySelectNone()">Clear</button>
+              </div>
+              <div class="deploy-computer-list" id="deployComputerList"></div>
+            </div>
+          </div>
+
+          <div class="deploy-footer">
+            <button class="deploy-btn" id="deployInstallBtn" onclick="runDeploy('install')" disabled>&#8659; Install</button>
+            <button class="deploy-btn" id="deployUpdateBtn" onclick="runDeploy('upgrade')" disabled>&#8593; Update</button>
+            <button class="deploy-btn danger" id="deployUninstallBtn" onclick="runDeploy('uninstall')" disabled>&#10005; Uninstall</button>
+            <span class="deploy-status" id="deployStatus"></span>
+          </div>
+
+          <div class="deploy-progress" id="deployProgress"></div>
+        </div>
+
+        <!-- Community tab -->
+        <div class="deploy-section" id="deployCommunity">
+          <div class="community-search-row">
+            <input id="communityPkgId" placeholder="Enter choco package ID (e.g. vlc, googlechrome, 7zip)">
+            <input id="communityPkgName" placeholder="Display name (optional)">
+            <a href="https://community.chocolatey.org/packages" target="_blank" style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;font-size:11px;font-family:var(--mono);background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:4px;text-decoration:none;white-space:nowrap;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent2)';this.style.color='var(--accent2)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">&#x1F50D; Browse Packages</a>
+          </div>
+
+          <div class="deploy-grid">
+            <div class="deploy-col">
+              <h4>Package</h4>
+              <div style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px;">
+                <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px">Package ID</div>
+                <div id="communityPkgPreview" style="font-size:13px;font-family:var(--mono);color:var(--text)">—</div>
+              </div>
+            </div>
+            <div class="deploy-col">
+              <h4>Target Computers</h4>
+              <div class="btn-row" style="margin-bottom:8px">
+                <button class="btn" onclick="deploySelectAll()">All</button>
+                <button class="btn" onclick="deploySelectOnline()">Online only</button>
+                <button class="btn" onclick="deploySelectNone()">Clear</button>
+              </div>
+              <div class="deploy-computer-list" id="deployComputerListCommunity"></div>
+            </div>
+          </div>
+
+          <div class="deploy-footer">
+            <button class="deploy-btn" id="communityInstallBtn" onclick="runCommunityDeploy('install')">&#8659; Install</button>
+            <button class="deploy-btn danger" id="communityUninstallBtn" onclick="runCommunityDeploy('uninstall')">&#10005; Uninstall</button>
+            <span class="deploy-status" id="communityDeployStatus"></span>
+          </div>
+
+          <div class="deploy-progress" id="communityDeployProgress"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── Software Summary ── -->
+    <div class="panel">
+      <div class="panel-header" onclick="togglePanel(this)">
+        <div class="panel-title">Software Summary<span class="panel-badge badge-info" id="chartBadge">0 packages</span></div>
+        <span class="panel-toggle">&#9658;</span>
+      </div>
+      <div class="panel-body">
+        <canvas id="chart"></canvas>
+        <div class="sw-list-controls">
+          <input id="swListSearch" placeholder="Filter packages..." oninput="renderSoftwareSummaryList()">
+          <select id="swListFilter" onchange="renderSoftwareSummaryList()">
+            <option value="all">All packages</option>
+            <option value="outdated">Outdated only</option>
+            <option value="choco">Choco managed</option>
+            <option value="unknown">Unknown only</option>
+          </select>
+          <span id="swListCount" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+        </div>
+        <div style="overflow-x:auto">
+          <table id="softwareListTable">
+            <thead><tr>
+              <th>Package</th>
+              <th>Publisher</th>
+              <th>Installed</th>
+              <th>Latest</th>
+              <th>Status</th>
+              <th>Computers</th>
+            </tr></thead>
+            <tbody id="softwareListBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Package Details ── -->
+    <div class="panel">
+      <div class="panel-header" onclick="togglePanel(this)">
+        <div class="panel-title">
+          Package Details
+          <span class="panel-badge badge-warn" id="outdatedBadge" onclick="filterOutdated(event)" style="cursor:pointer" title="Click to filter outdated only">0 outdated</span>
+          <span class="panel-badge badge-info" id="rowsBadge">0 rows</span>
+        </div>
+        <span class="panel-toggle">&#9658;</span>
+      </div>
+      <div class="panel-body open">
+        <div class="table-wrap">
+          <table id="dataTable">
+            <thead>
+              <tr>
+                <th onclick="setSort('computer')">Computer</th>
+                <th onclick="setSort('display_name')">Software</th>
+                <th onclick="setSort('display_version')">Installed</th>
+                <th onclick="setSort('env_latest')">Latest in Env</th>
+                <th onclick="setSort('choco_latest')">Latest (Choco)</th>
+                <th onclick="setSort('status')">Status</th>
+                <th onclick="setSort('publisher')">Publisher</th>
+                <th onclick="setSort('install_date')">Install Date</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody">
+              <tr><td colspan="9"><div class="loading"><div class="spinner"></div>Loading inventory...</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Job History ── -->
+    <div class="panel">
+      <div class="panel-header" onclick="togglePanel(this)">
+        <div class="panel-title">Job History<span class="panel-badge badge-ok" id="jobBadge">0 jobs</span></div>
+        <span class="panel-toggle">&#9658;</span>
+      </div>
+      <div class="panel-body" id="jobHistoryBody"><div class="empty">No jobs yet.</div></div>
+    </div>
+  </div>
+</div>
+
+
+
+<!-- Users Modal -->
+<div class="modal-overlay" id="usersModal" onclick="closeUsersModal(event)">
+  <div class="modal-box" style="width:480px">
+    <div class="modal-header">
+      <span class="modal-title">Manage Users</span>
+      <button class="modal-close" onclick="document.getElementById('usersModal').classList.remove('open')">&#10005;</button>
+    </div>
+    <div class="modal-body" style="padding:16px">
+      <div id="usersList" style="margin-bottom:20px"></div>
+      <div style="border-top:1px solid var(--border);padding-top:16px">
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Add New User</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="newUsername" placeholder="Username" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-size:13px;outline:none">
+          <input id="newPassword" type="password" placeholder="Password (min 6 chars)" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-size:13px;outline:none">
+        </div>
+        <button onclick="addUser()" style="padding:7px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer">Add User</button>
+        <span id="userAddError" style="color:var(--danger);font-size:12px;margin-left:10px"></span>
+      </div>
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Change My Password</div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input id="currentPassword" type="password" placeholder="Current password" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-size:13px;outline:none">
+          <input id="newPasswordChange" type="password" placeholder="New password" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:4px;font-size:13px;outline:none">
+        </div>
+        <button onclick="changePassword()" style="padding:7px 16px;background:var(--accent);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer">Change Password</button>
+        <span id="pwChangeMsg" style="font-size:12px;margin-left:10px"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="outputModal" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modalTitle">Job Output</span>
+      <button class="modal-close" onclick="document.getElementById('outputModal').classList.remove('open')">&#10005;</button>
+    </div>
+    <div class="modal-body"><pre id="modalContent"></pre></div>
+  </div>
+</div>
+
+<script>
+var allComputers        = [];
+var allInventory        = [];
+var allJobs             = [];
+var allInternalPackages = [];
+var serverConfig        = {};
+var envLatestMap        = new Map();
+var selectedComputers   = new Set();
+var selectedSoftware    = new Set();
+var showingOutdatedOnly = false;
+var chart;
+var activeJobPollers    = {};
+var sortState           = { column: null, direction: null };
+
+// Deploy state
+var deploySelectedPkg       = null;   // {id, choco_id, display_name}
+var deploySelectedComputers = new Set();
+var activeDeployTab         = 'internal';
+
+document.getElementById('computerSearch').addEventListener('input', renderComputerList);
+document.getElementById('softwareSearchSidebar').addEventListener('input', renderSoftwareList);
+document.getElementById('communityPkgId').addEventListener('input', function() {
+  var val = this.value.trim();
+  document.getElementById('communityPkgPreview').textContent = val || '—';
+});
+
+function startPolling() {
+  loadAll();
+  setInterval(loadJobs, 15000);
+}
+
+// Check auth on page load - start app only if logged in
+checkAuth();
+
+async function loadAll() {
+  await Promise.all([loadComputers(), loadInventory(), loadInternalPackages(), loadConfig()]);
+  await loadJobs();
+  showingOutdatedOnly = false;
+  document.getElementById('outdatedBadge').style.outline = '';
+  updateDashboard();
+  renderDeployComputerLists();
+  document.getElementById('lastRefresh').textContent = 'Refreshed ' + new Date().toLocaleTimeString();
+}
+
+async function loadComputers() {
+  try {
+    var r = await fetch('/api/computers');
+    allComputers = await r.json();
+    renderComputerList();
+    updateStats();
+  } catch(e) { console.error('loadComputers', e); }
+}
+
+async function loadInventory() {
+  try {
+    var r = await fetch('/api/inventory');
+    allInventory = await r.json();
+    buildEnvLatestMap();
+    renderSoftwareList();
+  } catch(e) { console.error('loadInventory', e); }
+}
+
+async function loadJobs() {
+  try {
+    var r = await fetch('/api/jobs');
+    allJobs = await r.json();
+    renderJobHistory();
+    document.getElementById('jobBadge').textContent = allJobs.length + ' jobs';
+  } catch(e) { console.error('loadJobs', e); }
+}
+
+async function loadInternalPackages() {
+  try {
+    var r = await fetch('/api/packages');
+    allInternalPackages = await r.json();
+    renderInternalPackageList();
+    document.getElementById('internalBadge').textContent = allInternalPackages.length + ' internal';
+  } catch(e) { console.error('loadInternalPackages', e); }
+}
+
+async function loadConfig() {
+  try {
+    var r = await fetch('/api/config');
+    serverConfig = await r.json();
+  } catch(e) { console.error('loadConfig', e); }
+}
+
+function formatLastSeen(timestamp) {
+  if (!timestamp) return 'Never';
+  var last        = new Date(timestamp);
+  var now         = new Date();
+  var diffMinutes = Math.floor((now - last) / 60000);
+  var diffHours   = Math.floor(diffMinutes / 60);
+  var diffDays    = Math.floor(diffHours / 24);
+  if (diffMinutes < 15) return 'Online now';
+  if (diffMinutes < 60) return diffMinutes + ' min ago';
+  if (diffHours   < 24) return diffHours + 'h ago';
+  return diffDays + 'd ago';
+}
+
+function buildEnvLatestMap() {
+  envLatestMap.clear();
+  allInventory.forEach(function(r) {
+    if (!r.display_name || !r.display_version) return;
+    var cur = envLatestMap.get(r.display_name);
+    if (!cur || compareVersions(r.display_version, cur) > 0)
+      envLatestMap.set(r.display_name, r.display_version);
+  });
+}
+
+function compareVersions(a, b) {
+  if (!a) return -1;
+  if (!b) return 1;
+  var pa = a.split('.').map(function(n) { return parseInt(n) || 0; });
+  var pb = b.split('.').map(function(n) { return parseInt(n) || 0; });
+  for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+    var na = pa[i] || 0, nb = pb[i] || 0;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
+  }
+  return 0;
+}
+
+function getStatus(r) {
+  var installed   = r.display_version || '';
+  var chocoLatest = r.choco_latest || '';
+  var envLatest   = envLatestMap.get(r.display_name) || '';
+  var chocoOutdated = !!(installed && chocoLatest && compareVersions(installed, chocoLatest) < 0);
+  var envOutdated   = !!(installed && envLatest && compareVersions(installed, envLatest) < 0);
+  if (chocoOutdated && envOutdated) return { outdated: true,  label: 'Outdated',   source: 'Choco & Env' };
+  if (chocoOutdated)                return { outdated: true,  label: 'Outdated',   source: 'Chocolatey'  };
+  if (envOutdated)                  return { outdated: true,  label: 'Outdated',   source: 'Env'         };
+  if (!r.choco_id)                  return { outdated: false, label: 'Unknown',    source: ''            };
+  if (!chocoLatest)                 return { outdated: false, label: 'Unknown',    source: ''            };
+  return                                   { outdated: false, label: 'Up to date', source: ''            };
+}
+
+function isOutdated(r) { return getStatus(r).outdated; }
+
+function filterOutdated(e) {
+  e.stopPropagation();
+  showingOutdatedOnly = !showingOutdatedOnly;
+  document.getElementById('outdatedBadge').style.outline = showingOutdatedOnly ? '1px solid var(--warn)' : '';
+  updateDashboard();
+}
+
+function setSort(column) {
+  if (sortState.column !== column) {
+    sortState.column = column; sortState.direction = 'asc';
+  } else if (sortState.direction === 'asc') {
+    sortState.direction = 'desc';
+  } else {
+    sortState.column = null; sortState.direction = null;
+  }
+  updateDashboard();
+}
+
+function updateSortIndicators() {
+  document.querySelectorAll('#dataTable thead th').forEach(function(th) {
+    th.classList.remove('sorted-asc', 'sorted-desc');
+  });
+  if (!sortState.column) return;
+  var map = { computer:0, display_name:1, display_version:2, env_latest:3, choco_latest:4, status:5, publisher:6, install_date:7 };
+  var th = document.querySelectorAll('#dataTable thead th')[map[sortState.column]];
+  if (th) th.classList.add(sortState.direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
+}
+
+// ── Deploy panel ───────────────────────────────────────────────────────────
+function switchDeployTab(tab, btn) {
+  activeDeployTab = tab;
+  document.querySelectorAll('.deploy-tab').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('.deploy-section').forEach(function(s) { s.classList.remove('active'); });
+  btn.classList.add('active');
+  document.getElementById('deploy' + (tab === 'internal' ? 'Internal' : 'Community')).classList.add('active');
+  renderDeployComputerLists();
+}
+
+function renderInternalPackageList() {
+  var list = document.getElementById('internalPkgList');
+  if (!allInternalPackages.length) {
+    list.innerHTML = '<div class="empty">No internal packages yet</div>';
+    deploySelectedPkg = null;
+    updateDeployButtons();
+    return;
+  }
+  list.innerHTML = '';
+  allInternalPackages.forEach(function(pkg) {
+    var div = document.createElement('div');
+    div.className = 'deploy-pkg-item' + (deploySelectedPkg && deploySelectedPkg.id === pkg.id ? ' selected' : '');
+    div.innerHTML =
+      '<div>' +
+        '<div class="deploy-pkg-name">' + (pkg.display_name || pkg.choco_id) + '</div>' +
+        '<div class="deploy-pkg-id">' + pkg.choco_id + (pkg.description ? ' — ' + pkg.description : '') + '</div>' +
+      '</div>' +
+      '<button class="delete-pkg-btn" onclick="deleteInternalPackage(event,' + pkg.id + ')">&#10005;</button>';
+    div.onclick = function(e) {
+      if (e.target.classList.contains('delete-pkg-btn')) return;
+      deploySelectedPkg = pkg;
+      renderInternalPackageList();
+      updateDeployButtons();
+    };
+    list.appendChild(div);
+  });
+}
+
+function renderDeployComputerLists() {
+  renderDeployComputerList('deployComputerList');
+  renderDeployComputerList('deployComputerListCommunity');
+}
+
+function renderDeployComputerList(containerId) {
+  var list = document.getElementById(containerId);
+  list.innerHTML = '';
+  if (!allComputers.length) { list.innerHTML = '<div class="empty">No computers</div>'; return; }
+  allComputers.forEach(function(c) {
+    var div = document.createElement('div');
+    div.className = 'deploy-computer-item' + (deploySelectedComputers.has(c.hostname) ? ' selected' : '');
+    div.innerHTML =
+      '<span class="status-dot ' + (c.status === 'online' ? 'dot-online' : 'dot-offline') + '"></span>' +
+      '<div style="display:flex;flex-direction:column;flex:1;overflow:hidden;">' +
+        '<span class="item-name">' + c.hostname + '</span>' +
+        '<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + formatLastSeen(c.last_seen) + '</span>' +
+      '</div>';
+    div.onclick = function() {
+      if (deploySelectedComputers.has(c.hostname)) deploySelectedComputers.delete(c.hostname);
+      else deploySelectedComputers.add(c.hostname);
+      renderDeployComputerLists();
+      updateDeployButtons();
+    };
+    list.appendChild(div);
+  });
+}
+
+function deploySelectAll() {
+  allComputers.forEach(function(c) { deploySelectedComputers.add(c.hostname); });
+  renderDeployComputerLists(); updateDeployButtons();
+}
+
+function deploySelectOnline() {
+  deploySelectedComputers.clear();
+  allComputers.filter(function(c) { return c.status === 'online'; })
+    .forEach(function(c) { deploySelectedComputers.add(c.hostname); });
+  renderDeployComputerLists(); updateDeployButtons();
+}
+
+function deploySelectNone() {
+  deploySelectedComputers.clear();
+  renderDeployComputerLists(); updateDeployButtons();
+}
+
+function updateDeployButtons() {
+  var hasPkg       = deploySelectedPkg !== null;
+  var hasComputers = deploySelectedComputers.size > 0;
+  var ok           = hasPkg && hasComputers;
+  document.getElementById('deployInstallBtn').disabled   = !ok;
+  document.getElementById('deployUpdateBtn').disabled    = !ok;
+  document.getElementById('deployUninstallBtn').disabled = !ok;
+}
+
+async function addInternalPackage() {
+  var chocoId = document.getElementById('newPkgId').value.trim().toLowerCase();
+  var name    = document.getElementById('newPkgName').value.trim();
+  var desc    = document.getElementById('newPkgDesc').value.trim();
+  if (!chocoId) { alert('Choco ID is required'); return; }
+  try {
+    await fetch('/api/packages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ choco_id: chocoId, display_name: name || chocoId, description: desc })
+    });
+    document.getElementById('newPkgId').value   = '';
+    document.getElementById('newPkgName').value = '';
+    document.getElementById('newPkgDesc').value = '';
+    await loadInternalPackages();
+  } catch(e) { alert('Failed to add package'); }
+}
+
+async function deleteInternalPackage(e, pkgId) {
+  e.stopPropagation();
+  if (!confirm('Remove this package from the internal list?')) return;
+  try {
+    await fetch('/api/packages/' + pkgId, { method: 'DELETE' });
+    if (deploySelectedPkg && deploySelectedPkg.id === pkgId) {
+      deploySelectedPkg = null;
+      updateDeployButtons();
+    }
+    await loadInternalPackages();
+  } catch(e) { alert('Failed to delete package'); }
+}
+
+async function runDeploy(action) {
+  if (!deploySelectedPkg || deploySelectedComputers.size === 0) return;
+
+  var computers   = Array.from(deploySelectedComputers);
+  var sourceUrl   = action === 'uninstall' ? null : (serverConfig.internal_source_url || null);
+  var confirmMsg  = action === 'uninstall'
+    ? 'Uninstall "' + deploySelectedPkg.display_name + '" from ' + computers.length + ' computer(s)?'
+    : (action === 'install' ? 'Install' : 'Update') + ' "' + deploySelectedPkg.display_name + '" on ' + computers.length + ' computer(s)?';
+
+  if (!confirm(confirmMsg)) return;
+
+  document.getElementById('deployStatus').textContent = 'Queuing jobs...';
+  showDeployProgress('deployProgress', computers, 'pending');
+
+  try {
+    var res = await fetch('/api/jobs/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        package_id:   deploySelectedPkg.choco_id,
+        display_name: deploySelectedPkg.display_name,
+        action:       action,
+        source_url:   sourceUrl,
+        computers:    computers
+      })
+    });
+    var data = await res.json();
+    document.getElementById('deployStatus').textContent = 'Queued ' + data.queued + ' job(s)';
+    if (data.skipped && data.skipped.length) {
+      document.getElementById('deployStatus').textContent += ' (' + data.skipped.length + ' skipped)';
+    }
+    loadJobs();
+    pollBulkJobs(data.job_ids, 'deployProgress', computers);
+  } catch(e) {
+    document.getElementById('deployStatus').textContent = 'Error queuing jobs';
+  }
+}
+
+async function runCommunityDeploy(action) {
+  var chocoId  = document.getElementById('communityPkgId').value.trim().toLowerCase();
+  var name     = document.getElementById('communityPkgName').value.trim() || chocoId;
+  var computers = Array.from(deploySelectedComputers);
+
+  if (!chocoId) { alert('Enter a package ID first'); return; }
+  if (!computers.length) { alert('Select at least one computer'); return; }
+
+  var confirmMsg = action === 'uninstall'
+    ? 'Uninstall "' + chocoId + '" from ' + computers.length + ' computer(s)?'
+    : 'Install "' + chocoId + '" on ' + computers.length + ' computer(s)?';
+
+  if (!confirm(confirmMsg)) return;
+
+  document.getElementById('communityDeployStatus').textContent = 'Queuing jobs...';
+  showDeployProgress('communityDeployProgress', computers, 'pending');
+
+  try {
+    var res = await fetch('/api/jobs/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        package_id:   chocoId,
+        display_name: name,
+        action:       action,
+        source_url:   null,
+        computers:    computers
+      })
+    });
+    var data = await res.json();
+    document.getElementById('communityDeployStatus').textContent = 'Queued ' + data.queued + ' job(s)';
+    loadJobs();
+    pollBulkJobs(data.job_ids, 'communityDeployProgress', computers);
+  } catch(e) {
+    document.getElementById('communityDeployStatus').textContent = 'Error queuing jobs';
+  }
+}
+
+function showDeployProgress(containerId, computers, initialStatus) {
+  var container = document.getElementById(containerId);
+  container.classList.add('visible');
+  container.innerHTML = '';
+  computers.forEach(function(hostname) {
+    var div = document.createElement('div');
+    div.className = 'progress-item';
+    div.id = 'progress-' + containerId + '-' + hostname.replace(/[^a-z0-9]/gi, '_');
+    div.innerHTML =
+      '<span class="progress-hostname">' + hostname + '</span>' +
+      '<span class="progress-status job-' + initialStatus + '">' + initialStatus + '</span>';
+    container.appendChild(div);
+  });
+}
+
+function updateProgressItem(containerId, hostname, status) {
+  var id  = 'progress-' + containerId + '-' + hostname.replace(/[^a-z0-9]/gi, '_');
+  var div = document.getElementById(id);
+  if (!div) return;
+  var span = div.querySelector('.progress-status');
+  span.className = 'progress-status job-' + status;
+  span.textContent = status;
+}
+
+function pollBulkJobs(jobIds, progressContainerId, computers) {
+  if (!jobIds || !jobIds.length) return;
+
+  var remaining = new Set(jobIds);
+  var jobComputerMap = {};
+
+  jobIds.forEach(function(jobId, i) {
+    if (computers[i]) jobComputerMap[jobId] = computers[i];
+  });
+
+  var interval = setInterval(async function() {
+    if (remaining.size === 0) { clearInterval(interval); loadJobs(); return; }
+
+    var toCheck = Array.from(remaining);
+    for (var i = 0; i < toCheck.length; i++) {
+      try {
+        var res = await fetch('/api/jobs/' + toCheck[i]);
+        var job = await res.json();
+        var hostname = jobComputerMap[toCheck[i]];
+        if (hostname) updateProgressItem(progressContainerId, hostname, job.status);
+        if (job.status === 'done' || job.status === 'failed') remaining.delete(toCheck[i]);
+      } catch(e) { remaining.delete(toCheck[i]); }
+    }
+
+    if (remaining.size === 0) { clearInterval(interval); loadJobs(); }
+  }, 5000);
+}
+
+// ── Sidebar: computers ─────────────────────────────────────────────────────
+function renderComputerList() {
+  var search = document.getElementById('computerSearch').value.toLowerCase();
+  var list   = document.getElementById('computerList');
+  list.innerHTML = '';
+  var filtered = allComputers.filter(function(c) { return c.hostname.toLowerCase().includes(search); });
+  if (!filtered.length) { list.innerHTML = '<div class="empty" style="padding:10px">No computers</div>'; return; }
+  filtered.forEach(function(c) {
+    var div = document.createElement('div');
+    div.className = 'list-item' + (selectedComputers.has(c.hostname) ? ' selected' : '');
+    div.innerHTML =
+      '<span class="status-dot ' + (c.status === 'online' ? 'dot-online' : 'dot-offline') + '"></span>' +
+      '<div style="display:flex;flex-direction:column;flex:1;overflow:hidden;">' +
+        '<span class="item-name">' + c.hostname + '</span>' +
+        '<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + formatLastSeen(c.last_seen) + '</span>' +
+      '</div>';
+    div.onclick = function() { toggleComputer(c.hostname, div); };
+    list.appendChild(div);
+  });
+  updateSidebarMeta();
+}
+
+function toggleComputer(hostname, el) {
+  if (selectedComputers.has(hostname)) { selectedComputers.delete(hostname); el.classList.remove('selected'); }
+  else { selectedComputers.add(hostname); el.classList.add('selected'); }
+  renderSoftwareList(); updateDashboard();
+}
+
+function selectAllComputers() {
+  allComputers.forEach(function(c) { selectedComputers.add(c.hostname); });
+  renderComputerList(); renderSoftwareList(); updateDashboard();
+}
+
+function clearComputers() {
+  selectedComputers.clear(); renderComputerList(); renderSoftwareList(); updateDashboard();
+}
+
+// ── Sidebar: software ──────────────────────────────────────────────────────
+function renderSoftwareList() {
+  var search = document.getElementById('softwareSearchSidebar').value.toLowerCase();
+  var list   = document.getElementById('softwareList');
+  list.innerHTML = '';
+  var data = allInventory;
+  if (selectedComputers.size > 0) data = data.filter(function(r) { return selectedComputers.has(r.computer); });
+  var names    = Array.from(new Set(data.map(function(r) { return r.display_name; }).filter(Boolean))).sort();
+  var filtered = names.filter(function(n) { return n.toLowerCase().includes(search); });
+  filtered.forEach(function(name) {
+    var div = document.createElement('div');
+    div.className = 'list-item' + (selectedSoftware.has(name) ? ' selected' : '');
+    div.innerHTML = '<span class="item-name">' + name + '</span>';
+    div.onclick = function() { toggleSoftware(name, div); };
+    list.appendChild(div);
+  });
+}
+
+function toggleSoftware(name, el) {
+  if (selectedSoftware.has(name)) { selectedSoftware.delete(name); el.classList.remove('selected'); }
+  else { selectedSoftware.add(name); el.classList.add('selected'); }
+  updateDashboard();
+}
+
+function selectAllSoftware() {
+  var search = document.getElementById('softwareSearchSidebar').value.toLowerCase();
+  var data = allInventory;
+  if (selectedComputers.size > 0) data = data.filter(function(r) { return selectedComputers.has(r.computer); });
+  var names = Array.from(new Set(data.map(function(r) { return r.display_name; }).filter(Boolean))).sort();
+  names.filter(function(n) { return n.toLowerCase().includes(search); }).forEach(function(n) { selectedSoftware.add(n); });
+  renderSoftwareList(); updateDashboard();
+}
+
+function clearSoftware() { selectedSoftware.clear(); renderSoftwareList(); updateDashboard(); }
+
+function updateStats() {
+  var online = allComputers.filter(function(c) { return c.status === 'online'; }).length;
+  document.getElementById('statComputers').textContent = allComputers.length;
+  document.getElementById('statOnline').textContent    = online;
+}
+
+function updateSidebarMeta() {
+  var online  = allComputers.filter(function(c) { return c.status === 'online'; }).length;
+  var offline = allComputers.length - online;
+  document.getElementById('sidebarMeta').textContent = online + ' online \u00b7 ' + offline + ' offline';
+}
+
+function updateDashboard() {
+  var search = document.getElementById('softwareSearch').value.toLowerCase();
+  var data = allInventory;
+  if (selectedComputers.size > 0) data = data.filter(function(r) { return selectedComputers.has(r.computer); });
+  if (selectedSoftware.size > 0)  data = data.filter(function(r) { return selectedSoftware.has(r.display_name); });
+  if (search)                      data = data.filter(function(r) { return r.display_name && r.display_name.toLowerCase().includes(search); });
+  if (showingOutdatedOnly)         data = data.filter(function(r) { return isOutdated(r); });
+
+  if (sortState.column && sortState.direction) {
+    data.sort(function(a, b) {
+      var valA, valB;
+      switch (sortState.column) {
+        case 'computer':        valA = a.computer || '';     valB = b.computer || '';     break;
+        case 'display_name':    valA = a.display_name || ''; valB = b.display_name || ''; break;
+        case 'display_version': return sortState.direction === 'asc' ? compareVersions(a.display_version, b.display_version) : compareVersions(b.display_version, a.display_version);
+        case 'env_latest':      return sortState.direction === 'asc' ? compareVersions(envLatestMap.get(a.display_name)||'', envLatestMap.get(b.display_name)||'') : compareVersions(envLatestMap.get(b.display_name)||'', envLatestMap.get(a.display_name)||'');
+        case 'choco_latest':    return sortState.direction === 'asc' ? compareVersions(a.choco_latest, b.choco_latest) : compareVersions(b.choco_latest, a.choco_latest);
+        case 'status':          valA = isOutdated(a) ? 1 : 0; valB = isOutdated(b) ? 1 : 0; break;
+        case 'publisher':       valA = a.publisher || '';    valB = b.publisher || '';    break;
+        case 'install_date':    valA = a.install_date || ''; valB = b.install_date || ''; break;
+        default: return 0;
+      }
+      if (valA < valB) return sortState.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortState.direction === 'asc' ?  1 : -1;
+      return 0;
+    });
+  }
+
+  renderChart(data);
+  renderTable(data);
+  buildSoftwareSummary(data);
+  renderSoftwareSummaryList();
+  updateSortIndicators();
+
+  var totalOutdated = allInventory.filter(function(r) { return isOutdated(r); }).length;
+  document.getElementById('statPackages').textContent  = data.length;
+  document.getElementById('statOutdated').textContent  = totalOutdated;
+  document.getElementById('outdatedBadge').textContent = totalOutdated + ' outdated';
+  document.getElementById('rowsBadge').textContent     = Math.min(data.length, 500) + ' rows';
+  document.getElementById('chartBadge').textContent    = data.length + ' packages';
+}
+
+function renderChart(data) {
+  var groupBy = document.getElementById('groupBy').value;
+  var grouped = {};
+  data.forEach(function(r) { var key = r[groupBy] || 'Unknown'; grouped[key] = (grouped[key] || 0) + 1; });
+  var sorted = Object.entries(grouped).sort(function(a,b) { return b[1]-a[1]; }).slice(0,30);
+  var ctx = document.getElementById('chart').getContext('2d');
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: sorted.map(function(e){return e[0];}), datasets: [{ label: 'Count', data: sorted.map(function(e){return e[1];}), backgroundColor: 'rgba(0,212,170,0.25)', borderColor: 'rgba(0,212,170,0.8)', borderWidth: 1, borderRadius: 3 }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 10 }, maxRotation: 45 }, grid: { color: '#262b38' } }, y: { ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#262b38' } } } }
+  });
+}
+
+function renderTable(data) {
+  rowSourceMap = {};
+  var tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  if (!data.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No data</div></td></tr>'; return; }
+
+  data.slice(0, 500).forEach(function(r) {
+    var status = getStatus(r);
+    var tr = document.createElement('tr');
+    if (status.outdated) tr.classList.add('outdated');
+
+    var statusHtml;
+    if (status.outdated) {
+      statusHtml = '<span class="status-pill pill-outdated" title="Flagged by: ' + status.source + '">Outdated <span class="pill-source">' + status.source + '</span></span>';
+    } else if (status.label === 'Unknown') {
+      statusHtml = '<span class="status-pill pill-unknown">Unknown</span>';
+    } else {
+      statusHtml = '<span class="status-pill pill-uptodate">Up to date</span>';
+    }
+
+    var actionHtml = '';
+    if (r.choco_id) {
+      var safeId   = r.choco_id.replace(/'/g, "\\'");
+      var safeName = (r.display_name || '').replace(/'/g, "\\'");
+      var safeComp = (r.computer || '').replace(/'/g, "\\'");
+      var internalPkg = allInternalPackages.find(function(p) { return p.choco_id === r.choco_id; });
+      var rowSource = internalPkg ? (serverConfig.internal_source_url || '') : '';
+      var rowKey = safeComp + '||' + safeId;
+      rowSourceMap[rowKey] = rowSource;
+      if (status.outdated) {
+        actionHtml += '<button class="update-btn" style="margin-right:4px" onclick="requestUpgradeByKey(\'' + safeComp + '\',\'' + safeId + '\',\'' + safeName + '\',this)">Update</button>';
+      }
+      actionHtml += '<button class="uninstall-btn" style="margin-right:4px" onclick="requestUninstall(\'' + safeComp + '\',\'' + safeId + '\',\'' + safeName + '\',this)">Uninstall</button>';
+      if (!internalPkg) {
+        actionHtml += '<a href="https://community.chocolatey.org/packages/' + r.choco_id + '" target="_blank" style="display:inline-flex;align-items:center;padding:3px 8px;font-size:10px;font-family:var(--mono);background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;text-decoration:none;transition:all 0.15s" onmouseover="this.style.borderColor=\'var(--accent2)\';this.style.color=\'var(--accent2)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.color=\'var(--muted)\'">&#x1F517;</a>';
+      }
+    }
+
+    var envLatest = envLatestMap.get(r.display_name) || '';
+    tr.innerHTML =
+      '<td><span class="computer-pill">' + (r.computer || '') + '</span></td>' +
+      '<td class="td-name" onclick="filterBySoftware(\'' + (r.display_name||'').replace(/'/g,"\\'") + '\')">' + (r.display_name || '') + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px">' + (r.display_version || '') + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--accent2)">' + (envLatest || '&#8212;') + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--accent)">' + (r.choco_latest || '&#8212;') + '</td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td style="color:var(--muted)">' + (r.publisher || '') + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--muted)">' + (r.install_date || '') + '</td>' +
+      '<td>' + actionHtml + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function filterBySoftware(name) {
+  selectedSoftware.clear(); selectedSoftware.add(name); renderSoftwareList(); updateDashboard();
+}
+
+async function requestUpgradeByKey(computer, chocoId, displayName, btn) {
+  var key = computer + '||' + chocoId;
+  var sourceUrl = rowSourceMap[key] || null;
+  return requestUpgrade(computer, chocoId, displayName, sourceUrl, btn);
+}
+
+async function requestUpgrade(computer, chocoId, displayName, sourceUrl, btn) {
+  if (!confirm('Upgrade "' + displayName + '" on ' + computer + '?')) return;
+  btn.disabled = true; btn.textContent = 'Queued...';
+  try {
+    var res = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ computer: computer, package_id: chocoId, display_name: displayName, action: 'upgrade', source_url: sourceUrl || null })
+    });
+    var data = await res.json();
+    if (data.job_id) { pollJob(data.job_id, btn); loadJobs(); }
+    else { btn.textContent = 'Error'; btn.disabled = false; }
+  } catch(e) { btn.textContent = 'Error'; btn.disabled = false; }
+}
+
+async function requestUninstall(computer, chocoId, displayName, btn) {
+  if (!confirm('Uninstall "' + displayName + '" from ' + computer + '?\nThis cannot be undone.')) return;
+  btn.disabled = true; btn.textContent = 'Queued...';
+  try {
+    var res = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ computer: computer, package_id: chocoId, display_name: displayName, action: 'uninstall' })
+    });
+    var data = await res.json();
+    if (data.job_id) { pollJob(data.job_id, btn); loadJobs(); }
+    else { btn.textContent = 'Error'; btn.disabled = false; }
+  } catch(e) { btn.textContent = 'Error'; btn.disabled = false; }
+}
+
+function pollJob(jobId, btn) {
+  if (activeJobPollers[jobId]) clearInterval(activeJobPollers[jobId]);
+  activeJobPollers[jobId] = setInterval(async function() {
+    try {
+      var res = await fetch('/api/jobs/' + jobId);
+      var job = await res.json();
+      if (job.status === 'running') {
+        btn.textContent = 'Running...'; btn.classList.add('running');
+      } else if (job.status === 'done') {
+        btn.textContent = '\u2713 Done'; btn.classList.add('done'); btn.disabled = true;
+        clearInterval(activeJobPollers[jobId]); loadJobs();
+      } else if (job.status === 'failed') {
+        btn.textContent = '\u2717 Failed'; btn.classList.add('failed'); btn.disabled = false;
+        clearInterval(activeJobPollers[jobId]); loadJobs();
+      }
+    } catch(e) { clearInterval(activeJobPollers[jobId]); }
+  }, 5000);
+}
+
+var jobOutputMap = {};
+var rowSourceMap = {};
+
+function renderJobHistory() {
+  var body = document.getElementById('jobHistoryBody');
+  if (!allJobs.length) { body.innerHTML = '<div class="empty">No jobs yet.</div>'; return; }
+  jobOutputMap = {};
+  var table = document.createElement('table');
+  table.innerHTML = '<thead><tr><th>Computer</th><th>Package</th><th>Action</th><th>Status</th><th>Created</th><th>Updated</th><th>Output</th></tr></thead>';
+  var tbody = document.createElement('tbody');
+  allJobs.forEach(function(job) {
+    var tr = document.createElement('tr');
+    var created    = job.created_at ? new Date(job.created_at).toLocaleString() : '\u2014';
+    var updated    = job.updated_at ? new Date(job.updated_at).toLocaleString() : '\u2014';
+    var actionColor = job.action === 'uninstall' ? 'var(--danger)' : job.action === 'install' ? '#a855f7' : 'var(--accent)';
+    tr.innerHTML =
+      '<td><span class="computer-pill">' + (job.hostname || '\u2014') + '</span></td>' +
+      '<td style="font-family:var(--mono);font-size:11px">' + (job.display_name || job.package_id) + '</td>' +
+      '<td><span style="color:' + actionColor + ';font-family:var(--mono);font-size:10px">' + (job.action || 'upgrade') + '</span></td>' +
+      '<td><span class="job-row-status job-' + job.status + '">' + job.status + '</span></td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--muted)">' + created + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--muted)">' + updated + '</td>' +
+      '<td class="output-cell"></td>';
+    var outputCell = tr.querySelector('.output-cell');
+    if (job.output !== null && job.output !== undefined) {
+      jobOutputMap[job.id] = { name: job.display_name || job.package_id, output: job.output || '(no output captured)' };
+      var btn = document.createElement('button');
+      btn.className = 'job-output-btn';
+      btn.textContent = 'View';
+      btn.addEventListener('click', (function(id) {
+        return function() { showOutputById(id); };
+      })(job.id));
+      outputCell.appendChild(btn);
+    } else {
+      outputCell.textContent = '\u2014';
+    }
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  body.innerHTML = '';
+  body.appendChild(table);
+}
+
+function showOutputById(jobId) {
+  var entry = jobOutputMap[jobId];
+  if (!entry) { alert('Output not available'); return; }
+  document.getElementById('modalTitle').textContent   = entry.name || jobId;
+  document.getElementById('modalContent').textContent = entry.output || 'No output';
+  document.getElementById('outputModal').classList.add('open');
+}
+
+function showOutput(jobId, name, output) {
+  document.getElementById('modalTitle').textContent   = name || jobId;
+  document.getElementById('modalContent').textContent = output || 'No output';
+  document.getElementById('outputModal').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('outputModal'))
+    document.getElementById('outputModal').classList.remove('open');
+}
+
+function togglePanel(header) {
+  var body   = header.nextElementSibling;
+  var toggle = header.querySelector('.panel-toggle');
+  body.classList.toggle('open');
+  toggle.classList.toggle('open');
+}
+
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.logged_in) {
+        showApp(data.username);
+        return;
+      }
+    }
+  } catch(e) {}
+  showLogin();
+}
+
+function showLogin() {
+  document.getElementById('loginOverlay').classList.add('active');
+  document.getElementById('loginUser').focus();
+}
+
+function showApp(username) {
+  document.getElementById('loginOverlay').classList.remove('active');
+  const menu = document.getElementById('userMenu');
+  menu.style.display = 'flex';
+  document.getElementById('userMenuName').textContent = username;
+}
+
+async function doLogin() {
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value;
+  const errEl    = document.getElementById('loginError');
+  errEl.textContent = '';
+  if (!username || !password) { errEl.textContent = 'Enter username and password'; return; }
+  try {
+    const res  = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, password})
+    });
+    const data = await res.json();
+    if (res.ok) {
+      showApp(data.username);
+      startPolling();
+    } else {
+      errEl.textContent = data.error || 'Login failed';
+    }
+  } catch(e) {
+    errEl.textContent = 'Connection error';
+  }
+}
+
+async function doLogout() {
+  await fetch('/api/auth/logout', {method: 'POST'});
+  location.reload();
+}
+
+// Allow Enter key on login form
+document.addEventListener('DOMContentLoaded', function() {
+  ['loginUser','loginPass'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') doLogin();
+    });
+  });
+});
+
+// ── Users management ──────────────────────────────────────────────────────────
+function showUsersPanel() {
+  document.getElementById('usersModal').classList.add('open');
+  loadUsers();
+}
+
+function closeUsersModal(e) {
+  if (e.target === document.getElementById('usersModal'))
+    document.getElementById('usersModal').classList.remove('open');
+}
+
+async function loadUsers() {
+  const res  = await fetch('/api/auth/users');
+  const list = await res.json();
+  const el   = document.getElementById('usersList');
+  if (!list.length) { el.innerHTML = '<div style="color:var(--muted);font-size:12px">No users yet.</div>'; return; }
+  el.innerHTML = list.map(u =>
+    '<div class="user-row">' +
+      '<span>' + u.username + '</span>' +
+      '<button onclick="deleteUser(' + u.id + ', this)" style="padding:3px 8px;font-size:10px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer">Remove</button>' +
+    '</div>'
+  ).join('');
+}
+
+async function addUser() {
+  const username = document.getElementById('newUsername').value.trim();
+  const password = document.getElementById('newPassword').value;
+  const errEl    = document.getElementById('userAddError');
+  errEl.textContent = '';
+  const res  = await fetch('/api/auth/users', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username, password})
+  });
+  const data = await res.json();
+  if (res.ok) {
+    document.getElementById('newUsername').value = '';
+    document.getElementById('newPassword').value = '';
+    loadUsers();
+  } else {
+    errEl.textContent = data.error || 'Error adding user';
+  }
+}
+
+async function deleteUser(userId, btn) {
+  if (!confirm('Remove this user?')) return;
+  const res = await fetch('/api/auth/users/' + userId, {method: 'DELETE'});
+  if (res.ok) loadUsers();
+  else { const d = await res.json(); alert(d.error || 'Error'); }
+}
+
+async function changePassword() {
+  const current    = document.getElementById('currentPassword').value;
+  const newPass    = document.getElementById('newPasswordChange').value;
+  const msgEl      = document.getElementById('pwChangeMsg');
+  msgEl.textContent = '';
+  const res  = await fetch('/api/auth/change-password', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({current_password: current, new_password: newPass})
+  });
+  const data = await res.json();
+  if (res.ok) {
+    msgEl.style.color = 'var(--accent)';
+    msgEl.textContent = 'Password changed successfully';
+    document.getElementById('currentPassword').value = '';
+    document.getElementById('newPasswordChange').value = '';
+  } else {
+    msgEl.style.color = 'var(--danger)';
+    msgEl.textContent = data.error || 'Error';
+  }
+}
+
+
+// ── Software Summary List ─────────────────────────────────────────────────────
+var allSoftwareSummary = {};  // pkg display_name -> {publishers, versions, computers, choco_id, statuses}
+
+function buildSoftwareSummary(data) {
+  allSoftwareSummary = {};
+  data.forEach(function(r) {
+    var key = r.choco_id || r.display_name;
+    if (!key) return;
+    if (!allSoftwareSummary[key]) {
+      allSoftwareSummary[key] = {
+        display_name: r.display_name,
+        choco_id:     r.choco_id || null,
+        publishers:   new Set(),
+        versions:     new Set(),
+        latest:       r.choco_latest || null,
+        computers:    new Set(),
+        outdated:     false,
+        unknown:      false
+      };
+    }
+    var entry = allSoftwareSummary[key];
+    if (r.publisher) entry.publishers.add(r.publisher);
+    if (r.display_version) entry.versions.add(r.display_version);
+    if (r.computer) entry.computers.add(r.computer);
+    if (r.choco_latest && r.choco_latest !== r.display_version) entry.outdated = true;
+    if (!r.choco_id) entry.unknown = true;
+    if (r.choco_latest) entry.latest = r.choco_latest;
+  });
+}
+
+function renderSoftwareSummaryList() {
+  var search    = (document.getElementById('swListSearch').value || '').toLowerCase();
+  var filter    = document.getElementById('swListFilter').value;
+  var tbody     = document.getElementById('softwareListBody');
+  var entries   = Object.values(allSoftwareSummary);
+
+  // Apply filter
+  if (filter === 'outdated') entries = entries.filter(function(e) { return e.outdated; });
+  else if (filter === 'choco') entries = entries.filter(function(e) { return !!e.choco_id; });
+  else if (filter === 'unknown') entries = entries.filter(function(e) { return !e.choco_id; });
+
+  // Apply search
+  if (search) entries = entries.filter(function(e) {
+    return (e.display_name || '').toLowerCase().includes(search) ||
+           (e.choco_id || '').toLowerCase().includes(search) ||
+           Array.from(e.publishers).join(' ').toLowerCase().includes(search);
+  });
+
+  // Sort: outdated first, then alphabetical
+  entries.sort(function(a, b) {
+    if (a.outdated !== b.outdated) return a.outdated ? -1 : 1;
+    return (a.display_name || '').localeCompare(b.display_name || '');
+  });
+
+  document.getElementById('swListCount').textContent = entries.length + ' packages';
+
+  if (!entries.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">No packages found</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = '';
+  entries.forEach(function(e) {
+    var key        = e.choco_id || e.display_name;
+    var versions   = Array.from(e.versions).join(', ') || '—';
+    var publisher  = Array.from(e.publishers)[0] || '—';
+    var computers  = e.computers.size;
+    var latest     = e.latest || '—';
+    var statusHtml;
+    if (e.outdated) {
+      statusHtml = '<span class="pill-small pill-outdated-sm">Outdated</span>';
+    } else if (e.unknown) {
+      statusHtml = '<span class="pill-small pill-unknown-sm">Unmanaged</span>';
+    } else {
+      statusHtml = '<span class="pill-small pill-ok-sm">Up to date</span>';
+    }
+    var nameHtml = e.display_name || e.choco_id || '—';
+    if (e.choco_id) nameHtml += ' <span style="font-family:var(--mono);font-size:9px;color:var(--muted)">' + e.choco_id + '</span>';
+    var tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.innerHTML =
+      '<td>' + nameHtml + '</td>' +
+      '<td style="color:var(--muted)">' + publisher + '</td>' +
+      '<td style="font-family:var(--mono)">' + versions + '</td>' +
+      '<td style="font-family:var(--mono)">' + latest + '</td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td style="font-family:var(--mono);color:var(--accent);text-decoration:underline">' + computers + ' computers</td>';
+    tr.addEventListener('click', (function(k, row) {
+      return function() { showSwComputers(k, row); };
+    })(key, tr));
+    tbody.appendChild(tr);
+  });
+}
+
+
+function showSwComputers(key, tr) {
+  // Toggle expanded computers row
+  var nextRow = tr.nextElementSibling;
+  if (nextRow && nextRow.classList.contains('sw-computers-row')) {
+    nextRow.remove();
+    tr.classList.remove('sw-expanded');
+    return;
+  }
+  // Close any other expanded rows
+  document.querySelectorAll('.sw-computers-row').forEach(function(r) { r.remove(); });
+  document.querySelectorAll('.sw-expanded').forEach(function(r) { r.classList.remove('sw-expanded'); });
+
+  var entry = allSoftwareSummary[key];
+  if (!entry) return;
+  var computers = Array.from(entry.computers).sort();
+  var expandRow = document.createElement('tr');
+  expandRow.className = 'sw-computers-row';
+  var td = document.createElement('td');
+  td.colSpan = 6;
+  td.style.cssText = 'padding:0 10px 10px 24px;background:var(--bg)';
+  td.innerHTML = computers.length
+    ? computers.map(function(c) {
+        return '<span class="computer-pill" style="cursor:pointer;margin:2px" onclick="filterToComputer(' + JSON.stringify(c) + ')">' + c + '</span>';
+      }).join(' ')
+    : '<span style="color:var(--muted);font-size:11px">No computers</span>';
+  expandRow.appendChild(td);
+  tr.classList.add('sw-expanded');
+  tr.parentNode.insertBefore(expandRow, tr.nextSibling);
+}
+
+function filterToComputer(hostname) {
+  selectedComputers.clear();
+  selectedComputers.add(hostname);
+  renderComputerList();
+  renderSoftwareList();
+  updateDashboard();
+}
+
+</script>
+</body>
+</html>

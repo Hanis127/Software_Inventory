@@ -1,0 +1,13 @@
+# created by virtualenv automatically
+__pycache__/
+*.pyc
+.venv/
+agent.spec
+agent_backup.py
+agent_new_backup.py
+cert.pem
+key.pem
+dist/
+build/
+backup_compiled_exe/
+*.egg-info/
