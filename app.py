@@ -6,18 +6,27 @@ from routes.packages   import packages_bp
 from routes.config     import config_bp
 from datetime import timedelta
 from auth import auth_bp, init_auth
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = "sw-inventory-k9x2mP#vQ8nL5rT"          # string to keep session live even when flask restarts
+
+secret = os.environ.get('FLASK_SECRET_KEY')
+if not secret:
+    raise RuntimeError("FLASK_SECRET_KEY not set in .env — refusing to start")
+app.secret_key = secret
 app.permanent_session_lifetime = timedelta(hours=8)
+
 app.register_blueprint(auth_bp)
 app.register_blueprint(inventory_bp)
 app.register_blueprint(jobs_bp)
 app.register_blueprint(computers_bp)
 app.register_blueprint(packages_bp)
 app.register_blueprint(config_bp)
-
 init_auth(app)
+
 
 @app.route("/")
 def index():
