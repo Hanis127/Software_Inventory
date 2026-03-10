@@ -12,6 +12,7 @@ import ssl
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+
 # ── Config ────────────────────────────────────────────────────────────────────
 SERVER_URL       = "https://YOUR_SERVER_IP:5000"
 COLLECT_INTERVAL = 600   # 10 minutes
@@ -56,7 +57,9 @@ def _build_ssl_context():
     for cert_path in cert_candidates:
         if os.path.exists(cert_path):
             ctx = ssl.create_default_context()
-            ctx.load_verify_locations(cert_path)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            ctx.load_verify_locations(cafile=cert_path)
             log(f"SSL: pinned to cert at {cert_path}")
             return ctx
     # Fallback: no cert found — warn loudly but continue with verification disabled
@@ -335,6 +338,30 @@ def normalize_unc(path):
         path = '\\\\' + path.lstrip('\\')
     return path
 
+# ── Input validation ──────────────────────────────────────────────────────────
+# Valid Chocolatey package IDs: letters, digits, dots, hyphens, underscores
+VALID_PKG_ID = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9._-]{0,198}[a-zA-Z0-9]$')
+
+# Valid source: UNC path (\\server\share) or http(s) URL
+VALID_SOURCE = re.compile(
+    r'^('
+    r'\\\\[a-zA-Z0-9._-]+\\[a-zA-Z0-9._\\/:-]+'
+    r'|https?://[a-zA-Z0-9._:/?&=%-]+'
+    r')$'
+)
+
+def validate_package_id(pkg):
+    if not pkg or not isinstance(pkg, str):
+        return False
+    return bool(VALID_PKG_ID.match(pkg))
+
+def validate_source_url(url):
+    if url is None:
+        return True  # None = use default Chocolatey source, always fine
+    if not isinstance(url, str):
+        return False
+    return bool(VALID_SOURCE.match(normalize_unc(url)))
+
 def run_upgrade(package_id, source_url=None):
     log(f"Running: choco upgrade {package_id}" + (f" --source {source_url}" if source_url else ""))
     try:
@@ -386,16 +413,28 @@ def poll_jobs():
         jobs = api_get(f"/api/jobs/pending/{hostname}")
         for job in jobs:
             action     = job.get('action', 'upgrade')
+            package_id = job.get('package_id', '')
             source_url = normalize_unc(job.get('source_url'))
-            log(f"Job received: {action} {job['package_id']}" + (f" from {source_url}" if source_url else ""))
+
+            # Validate before executing anything
+            if not validate_package_id(package_id):
+                log(f"SECURITY: Rejecting job {job['id']} - invalid package_id: {repr(package_id)}")
+                api_patch(f"/api/jobs/{job['id']}", {"status": "failed", "output": f"Rejected: invalid package_id {repr(package_id)}"})
+                continue
+            if not validate_source_url(source_url):
+                log(f"SECURITY: Rejecting job {job['id']} - invalid source_url: {repr(source_url)}")
+                api_patch(f"/api/jobs/{job['id']}", {"status": "failed", "output": f"Rejected: invalid source_url {repr(source_url)}"})
+                continue
+
+            log(f"Job received: {action} {package_id}" + (f" from {source_url}" if source_url else ""))
             api_patch(f"/api/jobs/{job['id']}", {"status": "running", "output": ""})
 
             if action == 'install':
-                success, output = run_install(job["package_id"], source_url)
+                success, output = run_install(package_id, source_url)
             elif action == 'uninstall':
-                success, output = run_uninstall(job["package_id"])
+                success, output = run_uninstall(package_id)
             else:
-                success, output = run_upgrade(job["package_id"], source_url)
+                success, output = run_upgrade(package_id, source_url)
 
             status = "done" if success else "failed"
             api_patch(f"/api/jobs/{job['id']}", {

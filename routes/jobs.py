@@ -1,54 +1,7 @@
 from flask import Blueprint, jsonify, request
 from Software_inventory.db  import query
-import uuid
 
 jobs_bp = Blueprint('jobs', __name__)
-
-# TODO Tady jsem komentoval
-# @jobs_bp.route('/api/jobs', methods=['POST'])
-# def create_job():
-#     print("CREATE JOB CALLED")
-#     data = request.json
-#     print("Incoming JSON:", data)
-#
-#     computer     = data.get('computer')
-#     package_id   = data.get('package_id')
-#     display_name = data.get('display_name', package_id)
-#     action       = data.get('action', 'upgrade')
-#
-#     row = query("SELECT id FROM computers WHERE hostname = %s", (computer,), fetch='one')
-#     print("Row result:", row)
-#
-#     if not row:
-#         print("Computer not found!")
-#         return jsonify({'error': 'Computer not found'}), 404
-#
-#     computer_id = row['id']  # ✅ fix here
-#
-#     result = query(
-#         """INSERT INTO jobs (computer_id, package_id, display_name, status, action)
-#            VALUES (%s, %s, %s, 'pending', %s) RETURNING id""",
-#         (computer_id, package_id, display_name, action),
-#         fetch='one'  # <-- add fetch='one' to get the inserted row
-#     )
-#
-#     job_id = result['id']
-#     print("Inserted job ID:", job_id)
-#
-#     return jsonify({'job_id': str(job_id)})
-#
-#
-# @jobs_bp.route("/api/jobs/pending/<hostname>")
-# def pending_jobs(hostname):
-#     rows = query("""
-#         SELECT j.id, j.package_id, j.display_name, j.action
-#         FROM jobs j
-#         JOIN computers c ON c.id = j.computer_id
-#         WHERE c.hostname = %s AND j.status = 'pending'
-#         ORDER BY j.created_at
-#     """, (hostname,), fetch='all')
-#     return jsonify([dict(r) for r in rows])
-
 
 @jobs_bp.route('/api/jobs', methods=['POST'])
 def create_job():
