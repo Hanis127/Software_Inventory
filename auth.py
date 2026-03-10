@@ -3,9 +3,11 @@ from functools import wraps
 from Software_inventory.db import query
 import hashlib
 import os
+import secrets
 
 auth_bp = Blueprint('auth', __name__)
 
+# ── Password hashing ──────────────────────────────────────────────────────────
 def hash_password(password):
     salt = os.urandom(32)
     key  = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000)
@@ -20,43 +22,47 @@ def verify_password(stored, provided):
     except Exception:
         return False
 
+# ── Agent API key auth ────────────────────────────────────────────────────────
+def get_agent_key():
+    row = query("SELECT value FROM config WHERE key = 'agent_api_key'", fetch='one')
+    return row['value'] if row else None
+
+def verify_agent_key(req):
+    key      = req.headers.get('X-Agent-Key') or req.headers.get('Authorization', '').replace('Bearer ', '')
+    expected = get_agent_key()
+    if not expected or not key:
+        return False
+    return secrets.compare_digest(key.strip(), expected.strip())
+
+def is_agent_path(path):
+    agent_paths = ['/api/inventory', '/api/jobs/pending', '/api/jobs/', '/api/config']
+    return any(path.startswith(p) for p in agent_paths)
+
+# ── Session auth ──────────────────────────────────────────────────────────────
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Allow agent endpoints without auth (they use internal HTTP or have no session)
-        agent_paths = ['/api/inventory', '/api/jobs/pending/', '/api/jobs/', '/api/config']
-        path = request.path
-        if any(path.startswith(p) for p in agent_paths) and request.method in ('POST', 'PATCH', 'GET'):
-            # Check if it's a browser request (has Accept: text/html) or agent request
-            if 'text/html' not in request.headers.get('Accept', ''):
-                return f(*args, **kwargs)
         if 'user_id' not in session:
             return jsonify({'error': 'Unauthorized'}), 401
         return f(*args, **kwargs)
     return decorated
 
 def init_auth(app):
-    """Call this from your main app to protect all API routes and serve login."""
     @app.before_request
     def require_login():
-        # Public paths - no auth needed
-        public = ['/login', '/api/auth/login', '/static/']
-        if any(request.path.startswith(p) for p in public):
+        path = request.path
+        if path.startswith('/api/auth/') or path.startswith('/static/'):
             return None
-        # Agent paths - no session needed (machine-to-machine)
-        agent_paths = ['/api/inventory', '/api/jobs/pending', '/api/jobs/', '/api/config']
-        if any(request.path.startswith(p) for p in agent_paths):
-            if 'text/html' not in request.headers.get('Accept', ''):
-                return None
-        # Everything else requires login
+        if is_agent_path(path):
+            if not verify_agent_key(request):
+                return jsonify({'error': 'Invalid or missing agent API key'}), 401
+            return None
         if 'user_id' not in session:
-            if request.path.startswith('/api/'):
+            if path.startswith('/api/'):
                 return jsonify({'error': 'Unauthorized'}), 401
-            # Serve dashboard - it will show login screen based on /api/auth/me
-            return None
+        return None
 
 # ── Auth API ──────────────────────────────────────────────────────────────────
-
 @auth_bp.route('/api/auth/login', methods=['POST'])
 def login():
     data     = request.json or {}
@@ -64,8 +70,7 @@ def login():
     password = data.get('password', '')
     if not username or not password:
         return jsonify({'error': 'Username and password required'}), 400
-    row = query("SELECT id, password_hash FROM users WHERE username = %s",
-                (username,), fetch='one')
+    row = query("SELECT id, password_hash FROM users WHERE username = %s", (username,), fetch='one')
     if not row or not verify_password(row['password_hash'], password):
         return jsonify({'error': 'Invalid username or password'}), 401
     session['user_id']  = row['id']
@@ -85,16 +90,14 @@ def me():
     return jsonify({'logged_in': True, 'username': session.get('username')})
 
 @auth_bp.route('/api/auth/users', methods=['GET'])
+@login_required
 def list_users():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
     rows = query("SELECT id, username, created_at FROM users ORDER BY username", fetch='all')
     return jsonify([dict(r) for r in rows])
 
 @auth_bp.route('/api/auth/users', methods=['POST'])
+@login_required
 def create_user():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
     data     = request.json or {}
     username = data.get('username', '').strip().lower()
     password = data.get('password', '')
@@ -106,33 +109,44 @@ def create_user():
     if existing:
         return jsonify({'error': 'Username already exists'}), 409
     pw_hash = hash_password(password)
-    query("INSERT INTO users (username, password_hash) VALUES (%s, %s)",
-          (username, pw_hash))
+    query("INSERT INTO users (username, password_hash) VALUES (%s, %s)", (username, pw_hash))
     return jsonify({'ok': True})
 
 @auth_bp.route('/api/auth/users/<int:user_id>', methods=['DELETE'])
+@login_required
 def delete_user(user_id):
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
     if user_id == session.get('user_id'):
         return jsonify({'error': 'Cannot delete your own account'}), 400
     query("DELETE FROM users WHERE id = %s", (user_id,))
     return jsonify({'ok': True})
 
 @auth_bp.route('/api/auth/change-password', methods=['POST'])
+@login_required
 def change_password():
-    if 'user_id' not in session:
-        return jsonify({'error': 'Unauthorized'}), 401
     data         = request.json or {}
     current      = data.get('current_password', '')
     new_password = data.get('new_password', '')
     if len(new_password) < 6:
         return jsonify({'error': 'Password must be at least 6 characters'}), 400
-    row = query("SELECT password_hash FROM users WHERE id = %s",
-                (session['user_id'],), fetch='one')
+    row = query("SELECT password_hash FROM users WHERE id = %s", (session['user_id'],), fetch='one')
     if not row or not verify_password(row['password_hash'], current):
         return jsonify({'error': 'Current password is incorrect'}), 401
     pw_hash = hash_password(new_password)
-    query("UPDATE users SET password_hash = %s WHERE id = %s",
-          (pw_hash, session['user_id']))
+    query("UPDATE users SET password_hash = %s WHERE id = %s", (pw_hash, session['user_id']))
     return jsonify({'ok': True})
+
+@auth_bp.route('/api/auth/generate-agent-key', methods=['POST'])
+@login_required
+def generate_agent_key():
+    new_key = secrets.token_urlsafe(32)
+    query("INSERT INTO config (key, value) VALUES ('agent_api_key', %s) ON CONFLICT (key) DO UPDATE SET value = %s",
+          (new_key, new_key))
+    return jsonify({'ok': True, 'key': new_key})
+
+@auth_bp.route('/api/auth/agent-key', methods=['GET'])
+@login_required
+def get_agent_key_endpoint():
+    key = get_agent_key()
+    if not key:
+        return jsonify({'key': None, 'message': 'No agent key set. Generate one first.'})
+    return jsonify({'key': key})
