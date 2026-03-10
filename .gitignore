@@ -7,6 +7,7 @@ agent.spec
 agent_backup.py
 agent_new_backup.py
 cert.pem
+server_cert.pem
 key.pem
 dist/
 build/

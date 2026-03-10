@@ -1,7 +1,7 @@
 """
 Run this once on the server to generate a self-signed certificate.
 Requires: pip install pyopenssl
-Output: cert.pem and key.pem in the same directory as your Flask app.
+Output: server_cert.pem and key.pem in the same directory as your Flask app.
 """
 from OpenSSL import crypto
 import os
@@ -30,7 +30,15 @@ def generate_self_signed_cert():
         f.write(crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
 
     print(f"Generated {CERT_FILE} and {KEY_FILE}")
-    print("Copy both files to your Flask app directory.")
+    print("")
+    print("Next steps:")
+    print("  1. Keep server_cert.pem and key.pem in your Flask app directory (server uses these)")
+    print("  2. Distribute server_cert.pem with agent.exe")
+    print("     e.g. place server_cert.pem in the same folder as agent.exe on each machine")
+    print("     or bundle it at C:\\ProgramData\\ChocoAgent\\server_cert.pem via install.bat")
+    print("")
+    print("The agent will pin trust to this exact certificate.")
+    print("If you regenerate the cert, you must redeploy server_cert.pem to all machines.")
 
 if __name__ == "__main__":
     generate_self_signed_cert()

@@ -45,7 +45,7 @@ def api_post(path, data):
         return json.loads(r.read())
 
 # SSL context that pins trust to the specific server certificate.
-# Place server_cert.pem (copy of cert.pem from the Flask server) alongside agent.exe.
+# Place server_cert.pem (copy of server_cert.pem from the Flask server) alongside agent.exe.
 # This is more secure than a CA-signed cert for internal use — the agent will only
 # talk to a server presenting exactly this certificate.
 def _build_ssl_context():
@@ -62,7 +62,7 @@ def _build_ssl_context():
     # Fallback: no cert found — warn loudly but continue with verification disabled
     # Deploy server_cert.pem alongside agent.exe to fix this
     log("WARNING: server_cert.pem not found — SSL certificate verification is DISABLED. "
-        "Copy cert.pem from the Flask server to server_cert.pem alongside agent.exe.")
+        "Copy server_cert.pem from the Flask server alongside agent.exe.")
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
