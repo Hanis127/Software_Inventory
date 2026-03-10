@@ -21,7 +21,7 @@ init_auth(app)
 
 @app.route("/")
 def index():
-    return send_from_directory(".", "dashboard.html")
+    return send_from_directory(".", "templates/dashboard.html")
 
 if __name__ == "__main__":
     app.run(
