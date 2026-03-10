@@ -1,23 +1,28 @@
 @echo off
-mkdir "C:\ProgramData\ChocoAgent" 2>nul
-copy /Y "\\your-server\NETLOGON\ChocoAgent\agent.exe" "C:\ProgramData\ChocoAgent\agent.exe"
-copy /Y "\\your-server\NETLOGON\ChocoAgent\nssm.exe" "C:\ProgramData\ChocoAgent\nssm.exe"
+
+set SRC=%SCRIPTROOT%\ChocoAgent
+set DEST=C:\ProgramData\ChocoAgent
+
+mkdir "%DEST%" 2>nul
+copy /Y "%SRC%\DMCPatchAgent.exe" "%DEST%\DMCPatchAgent.exe"
+copy /Y "%SRC%\nssm.exe" "%DEST%\nssm.exe"
 
 sc query ChocoAgent >nul 2>&1
-if %errorlevel% == 0 goto already_installed
+if %errorlevel% EQU 0 goto already_installed
 
-C:\ProgramData\ChocoAgent\nssm.exe install ChocoAgent "C:\ProgramData\ChocoAgent\agent.exe"
-C:\ProgramData\ChocoAgent\nssm.exe set ChocoAgent AppDirectory "C:\ProgramData\ChocoAgent"
-C:\ProgramData\ChocoAgent\nssm.exe set ChocoAgent AppStdout "C:\ProgramData\ChocoAgent\agent.log"
-C:\ProgramData\ChocoAgent\nssm.exe set ChocoAgent AppStderr "C:\ProgramData\ChocoAgent\agent.log"
-C:\ProgramData\ChocoAgent\nssm.exe set ChocoAgent AppRestartDelay 10000
-C:\ProgramData\ChocoAgent\nssm.exe set ChocoAgent ObjectName "LocalSystem"
-C:\ProgramData\ChocoAgent\nssm.exe set ChocoAgent Start SERVICE_AUTO_START
-C:\ProgramData\ChocoAgent\nssm.exe set ChocoAgent Description "Chocolatey inventory and update agent"
-C:\ProgramData\ChocoAgent\nssm.exe start ChocoAgent
+"%DEST%\nssm.exe" install DMCPatchAgent "%DEST%\DMCPatchAgent.exe"
+"%DEST%\nssm.exe" set DMCPatchAgent AppDirectory "%DEST%"
+"%DEST%\nssm.exe" set DMCPatchAgent AppStdout "%DEST%\DMCPatchAgent.log"
+"%DEST%\nssm.exe" set DMCPatchAgent AppStderr "%DEST%\DMCPatchAgent.log"
+"%DEST%\nssm.exe" set DMCPatchAgent AppRestartDelay 10000
+"%DEST%\nssm.exe" set DMCPatchAgent ObjectName "LocalSystem"
+"%DEST%\nssm.exe" set DMCPatchAgent Start SERVICE_AUTO_START
+"%DEST%\nssm.exe" set DMCPatchAgent Description "Chocolatey inventory and update agent"
+"%DEST%\nssm.exe" start DMCPatchAgent
 goto done
 
 :already_installed
-C:\ProgramData\ChocoAgent\nssm.exe restart ChocoAgent
+"%DEST%\nssm.exe" restart DMCPatchAgent
+"%DEST%\nssm.exe" start DMCPatchAgent
 
 :done
