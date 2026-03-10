@@ -12,12 +12,12 @@ import ssl
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-
 # ── Config ────────────────────────────────────────────────────────────────────
 SERVER_URL       = "https://YOUR_SERVER_IP:5000"
 COLLECT_INTERVAL = 600   # 10 minutes
 POLL_INTERVAL    = 60    # job polling in seconds
 LOG_PATH         = r"C:\ProgramData\ChocoAgent\agent.log"
+AGENT_KEY_PATH   = r"C:\ProgramData\ChocoAgent\agent.key"
 # ──────────────────────────────────────────────────────────────────────────────
 
 os.makedirs(r"C:\ProgramData\ChocoAgent", exist_ok=True)
@@ -36,10 +36,9 @@ def log(msg):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def api_post(path, data):
     body = json.dumps(data, default=str).encode()
-    req = urllib.request.Request(
-        f"{SERVER_URL}{path}",
-        data=body,
-        headers={"Content-Type": "application/json"},
+    req  = urllib.request.Request(
+        f"{SERVER_URL}{path}", data=body,
+        headers=_auth_headers({"Content-Type": "application/json"}),
         method="POST"
     )
     with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
@@ -73,17 +72,30 @@ def _build_ssl_context():
 
 _ssl_ctx = None  # initialized in main() after logging is set up
 
+def get_agent_key():
+    try:
+        with open(AGENT_KEY_PATH, 'r') as f:
+            return f.read().strip()
+    except Exception:
+        return None
+
+def _auth_headers(extra=None):
+    headers = dict(extra or {})
+    key = get_agent_key()
+    if key:
+        headers['X-Agent-Key'] = key
+    return headers
+
 def api_get(path):
-    req = urllib.request.Request(f"{SERVER_URL}{path}")
+    req = urllib.request.Request(f"{SERVER_URL}{path}", headers=_auth_headers())
     with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
         return json.loads(r.read())
 
 def api_patch(path, data):
     body = json.dumps(data, default=str).encode()
-    req = urllib.request.Request(
-        f"{SERVER_URL}{path}",
-        data=body,
-        headers={"Content-Type": "application/json"},
+    req  = urllib.request.Request(
+        f"{SERVER_URL}{path}", data=body,
+        headers=_auth_headers({"Content-Type": "application/json"}),
         method="PATCH"
     )
     with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
