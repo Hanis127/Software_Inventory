@@ -1357,11 +1357,15 @@ function togglePanel(header) {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 async function checkAuth() {
   try {
-    const res = await fetch('/api/auth/me');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('/api/auth/me', { signal: controller.signal });
+    clearTimeout(timeout);
     if (res.ok) {
       const data = await res.json();
       if (data.logged_in) {
         showApp(data.username);
+        startPolling();
         return;
       }
     }
