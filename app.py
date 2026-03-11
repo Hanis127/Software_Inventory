@@ -25,6 +25,9 @@ app.register_blueprint(jobs_bp)
 app.register_blueprint(computers_bp)
 app.register_blueprint(packages_bp)
 app.register_blueprint(config_bp)
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 init_auth(app)
 
 
