@@ -62,7 +62,7 @@ def generate_self_signed_cert():
     print("Next steps:")
     print("  1. Keep server_cert.pem and key.pem in your Flask app directory (server uses these)")
     print("  2. Copy server_cert.pem alongside agent.exe or deploy via install.bat to")
-    print("     C:\\ProgramData\\ChocoAgent\\server_cert.pem")
+    print("     C:\\ProgramData\\DMCPatchAgent\\server_cert.pem")
     print("")
     print("The agent will pin trust to this exact certificate.")
     print("If you regenerate the cert, redeploy server_cert.pem to all machines.")

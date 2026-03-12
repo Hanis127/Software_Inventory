@@ -16,11 +16,11 @@ from datetime import datetime
 SERVER_URL       = "https://YOUR_SERVER_IP:5000"
 COLLECT_INTERVAL = 600   # 10 minutes
 POLL_INTERVAL    = 60    # job polling in seconds
-LOG_PATH         = r"C:\ProgramData\ChocoAgent\agent.log"
-AGENT_KEY_PATH   = r"C:\ProgramData\ChocoAgent\agent.key"
+LOG_PATH         = r"C:\ProgramData\DMCPatchAgent\agent.log"
+AGENT_KEY_PATH   = r"C:\ProgramData\DMCPatchAgent\agent.key"
 # ──────────────────────────────────────────────────────────────────────────────
 
-os.makedirs(r"C:\ProgramData\ChocoAgent", exist_ok=True)
+os.makedirs(r"C:\ProgramData\DMCPatchAgent", exist_ok=True)
 
 logging.basicConfig(
     filename=LOG_PATH,
@@ -49,9 +49,10 @@ def api_post(path, data):
 # This is more secure than a CA-signed cert for internal use — the agent will only
 # talk to a server presenting exactly this certificate.
 def _build_ssl_context():
+    # Prefer pinning to the exact cert file — most reliable for self-signed certs.
     cert_candidates = [
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "server_cert.pem"),
-        r"C:\ProgramData\ChocoAgent\server_cert.pem",
+        r"C:\ProgramData\DMCPatchAgent\server_cert.pem",
     ]
     for cert_path in cert_candidates:
         if os.path.exists(cert_path):
@@ -61,10 +62,9 @@ def _build_ssl_context():
             ctx.load_verify_locations(cafile=cert_path)
             log(f"SSL: pinned to cert at {cert_path}")
             return ctx
-    # Fallback: no cert found — warn loudly but continue with verification disabled
-    # Deploy server_cert.pem alongside agent.exe to fix this
-    log("WARNING: server_cert.pem not found — SSL certificate verification is DISABLED. "
-        "Copy server_cert.pem from the Flask server alongside agent.exe.")
+
+    # Last resort — warn loudly
+    log("WARNING: server_cert.pem not found — SSL verification DISABLED")
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
