@@ -13,14 +13,33 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Config ────────────────────────────────────────────────────────────────────
-SERVER_URL       = "https://YOUR_SERVER_IP:5000"
+# config.json is written by the installer and lives next to the exe.
+# Use sys.executable when frozen (PyInstaller), __file__ otherwise (dev/testing).
+import sys
+_exe_dir    = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(_exe_dir, "config.json")
+
+def _load_config():
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            cfg = json.load(f)
+        server_url = cfg.get('server_url', '').strip().rstrip('/')
+        if not server_url:
+            raise RuntimeError("config.json has no server_url — reinstall the agent")
+        return server_url
+    except FileNotFoundError:
+        raise RuntimeError(f"config.json not found at {CONFIG_PATH} — reinstall the agent")
+
+SERVER_URL     = _load_config()
+INSTALL_DIR    = _exe_dir
+LOG_PATH       = os.path.join(_exe_dir, 'agent.log')
+AGENT_KEY_PATH = os.path.join(_exe_dir, 'agent.key')
+
 COLLECT_INTERVAL = 600   # 10 minutes
 POLL_INTERVAL    = 60    # job polling in seconds
-LOG_PATH         = r"C:\ProgramData\DMCPatchAgent\agent.log"
-AGENT_KEY_PATH   = r"C:\ProgramData\DMCPatchAgent\agent.key"
 # ──────────────────────────────────────────────────────────────────────────────
 
-os.makedirs(r"C:\ProgramData\DMCPatchAgent", exist_ok=True)
+os.makedirs(INSTALL_DIR, exist_ok=True)
 
 logging.basicConfig(
     filename=LOG_PATH,
@@ -51,8 +70,8 @@ def api_post(path, data):
 def _build_ssl_context():
     # Prefer pinning to the exact cert file — most reliable for self-signed certs.
     cert_candidates = [
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "server_cert.pem"),
-        r"C:\ProgramData\DMCPatchAgent\server_cert.pem",
+        os.path.join(_exe_dir, "server_cert.pem"),
+        os.path.join(INSTALL_DIR, "server_cert.pem"),
     ]
     for cert_path in cert_candidates:
         if os.path.exists(cert_path):
