@@ -1,0 +1,160 @@
+#define AppName        "your_app_name"
+#define AppVersion     "1.0"
+#define AppExeName     "your_exe_file_name.exe"
+#define ServiceName    "windows_service_name"
+#define DefaultPort    "your default port (5000)"
+#define InstallSubDir  "install_sub_directory"
+
+[Setup]
+AppName={#AppName}
+AppVersion={#AppVersion}
+DefaultDirName={commonappdata}\{#InstallSubDir}
+DefaultGroupName={#AppName}
+OutputBaseFilename={#AppName}Installer
+PrivilegesRequired=admin
+
+[Files]
+Source: "{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "nssm.exe";      DestDir: "{app}"; Flags: ignoreversion
+
+[Run]
+; Install the service only — do NOT start it here, config.json is not written yet
+Filename: "{app}\nssm.exe"; Parameters: "install {#ServiceName} ""{app}\{#AppExeName}"""; Flags: runhidden waituntilterminated
+
+[UninstallRun]
+; Stop and remove service on uninstall
+Filename: "{app}\nssm.exe"; Parameters: "stop {#ServiceName}";           Flags: runhidden waituntilterminated
+Filename: "{app}\nssm.exe"; Parameters: "remove {#ServiceName} confirm"; Flags: runhidden waituntilterminated
+
+[Code]
+var
+  ServerURLPage:    TInputQueryWizardPage;
+  ServerPortPage:   TInputQueryWizardPage;
+  EnrollmentPwPage: TInputQueryWizardPage;
+  CertPage:         TInputFileWizardPage;
+
+// -----------------------------------------------------------------------
+// Create wizard pages (GUI mode only)
+// -----------------------------------------------------------------------
+procedure InitializeWizard;
+begin
+  if not WizardSilent then
+  begin
+    ServerURLPage := CreateInputQueryPage(
+      wpWelcome,
+      'Server Address',
+      'Enter the inventory server address',
+      'Enter the IP address or hostname of your {#AppName} server (e.g. 192.168.1.10):'
+    );
+    ServerURLPage.Add('Server address:', False);
+    ServerURLPage.Values[0] := '';
+
+    ServerPortPage := CreateInputQueryPage(
+      ServerURLPage.ID,
+      'Server Port',
+      'Enter the inventory server port',
+      'Enter the port your {#AppName} server listens on:'
+    );
+    ServerPortPage.Add('Port:', False);
+    ServerPortPage.Values[0] := '{#DefaultPort}';
+
+    EnrollmentPwPage := CreateInputQueryPage(
+      ServerPortPage.ID,
+      'Enrollment Password',
+      'Enter the agent enrollment password',
+      'This password allows new agents to register with the server. Must match ENROLLMENT_PASSWORD in your server .env:'
+    );
+    EnrollmentPwPage.Add('Enrollment password:', False);
+    EnrollmentPwPage.Values[0] := '';
+
+    CertPage := CreateInputFilePage(
+      EnrollmentPwPage.ID,
+      'Server Certificate',
+      'Select the server certificate file',
+      'Select the server_cert.pem file provided by your administrator:'
+    );
+    CertPage.Add(
+      'Certificate file:',
+      'PEM files|*.pem|CRT files|*.crt|All files|*.*',
+      '.pem'
+    );
+  end;
+end;
+
+// -----------------------------------------------------------------------
+// Copy cert, register cert, write config.json, then start service
+// -----------------------------------------------------------------------
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  CertSource, ServerAddr, ServerPort, EnrollmentPw: String;
+  CertDest, ConfigDest:                             String;
+  ConfigJson:                                       String;
+  ResultCode:                                       Integer;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    CertDest   := ExpandConstant('{app}\server_cert.pem');
+    ConfigDest := ExpandConstant('{app}\config.json');
+
+    // Silent mode — read from command line parameters
+    if WizardSilent then
+    begin
+      CertSource   := ExpandConstant('{param:CERT}');
+      ServerAddr   := ExpandConstant('{param:SERVERADDR}');
+      ServerPort   := ExpandConstant('{param:SERVERPORT}');
+      EnrollmentPw := ExpandConstant('{param:ENROLLMENTPW}');
+      if ServerPort = '' then ServerPort := '{#DefaultPort}';
+    end
+    // GUI mode — read from wizard pages
+    else
+    begin
+      CertSource   := CertPage.Values[0];
+      ServerAddr   := ServerURLPage.Values[0];
+      ServerPort   := ServerPortPage.Values[0];
+      EnrollmentPw := EnrollmentPwPage.Values[0];
+      if ServerPort = '' then ServerPort := '{#DefaultPort}';
+    end;
+
+    // Validate
+    if not FileExists(CertSource) then
+    begin
+      MsgBox('Certificate file not found:' + #13#10 + CertSource, mbError, MB_OK);
+      Exit;
+    end;
+    if ServerAddr = '' then
+    begin
+      MsgBox('Server address cannot be empty.', mbError, MB_OK);
+      Exit;
+    end;
+    if EnrollmentPw = '' then
+    begin
+      MsgBox('Enrollment password cannot be empty.', mbError, MB_OK);
+      Exit;
+    end;
+
+    // Copy cert to install directory
+    FileCopy(CertSource, CertDest, False);
+
+    // Write config.json
+    ConfigJson := '{' +
+      '"server_url": "https://' + ServerAddr + ':' + ServerPort + '", ' +
+      '"server_port": ' + ServerPort + ', ' +
+      '"enrollment_password": "' + EnrollmentPw + '"' +
+      '}';
+    if not SaveStringToFile(ConfigDest, ConfigJson, False) then
+    begin
+      MsgBox('Warning: Failed to write config.json', mbError, MB_OK);
+      Exit;
+    end;
+
+    //// Register cert into Windows Trusted Root store
+    //Exec('certutil.exe', '-addstore -f "Root" "' + CertDest + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    //if ResultCode <> 0 then
+    //  MsgBox('Warning: Failed to register certificate. ResultCode: ' + IntToStr(ResultCode), mbError, MB_OK);
+
+    // Now that config.json is in place, start the service
+    Exec(ExpandConstant('{app}\nssm.exe'), 'start {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    if ResultCode <> 0 then
+      MsgBox('Warning: Failed to start service. ResultCode: ' + IntToStr(ResultCode), mbError, MB_OK);
+  end;
+end;

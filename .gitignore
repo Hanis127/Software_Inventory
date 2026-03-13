@@ -7,9 +7,10 @@ agent.spec
 agent_backup.py
 agent_new_backup.py
 server_cert.pem
-server_cert.pem
 key.pem
 dist/
 build/
 backup_compiled_exe/
 *.egg-info/
+certs/
+installer.iss.example
