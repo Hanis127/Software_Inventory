@@ -13,4 +13,4 @@ build/
 backup_compiled_exe/
 *.egg-info/
 certs/
-installer.iss.example
+installer.iss
