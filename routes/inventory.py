@@ -1,25 +1,25 @@
 from flask import Blueprint, jsonify, request
 from Software_inventory.db import query, get_conn
-from Software_inventory.auth import login_required, verify_agent_token
 import psycopg2.extras
 import requests, re
 
 inventory_bp = Blueprint('inventory', __name__)
 
-CHOCO_API   = "https://community.chocolatey.org/api/v2"
+CHOCO_API = "https://community.chocolatey.org/api/v2"
 CACHE_HOURS = 24
 
 @inventory_bp.route("/api/inventory", methods=["POST"])
 def receive_inventory():
-    """Agent posts inventory here — authenticated via agent token in before_request."""
-    data      = request.json
+    """Agent posts inventory here every 2 hours."""
+    data = request.json
     hostname  = data.get("hostname")
     ip        = data.get("ip_address")
     os_ver    = data.get("os_version")
     software  = data.get("software", [])
 
     with get_conn() as conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with conn.cursor(cursor_factory=__import__('psycopg2').extras.RealDictCursor) as cur:
+            # Upsert computer
             cur.execute("""
                 INSERT INTO computers (hostname, ip_address, os_version, last_seen, status)
                 VALUES (%s, %s, %s, NOW(), 'online')
@@ -32,12 +32,13 @@ def receive_inventory():
             """, (hostname, ip, os_ver))
             computer_id = cur.fetchone()["id"]
 
+            # Replace software for this machine
             cur.execute("DELETE FROM software WHERE computer_id = %s", (computer_id,))
 
             for pkg in software:
                 cur.execute("""
-                    INSERT INTO software
-                        (computer_id, display_name, display_version, publisher,
+                    INSERT INTO software 
+                        (computer_id, display_name, display_version, publisher, 
                          install_date, choco_id, choco_latest, choco_cached_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 """, (
@@ -55,9 +56,9 @@ def receive_inventory():
 
 @inventory_bp.route("/api/inventory")
 def get_inventory():
-    """Dashboard fetches all software — authenticated via session in before_request."""
+    """Dashboard fetches all software from here."""
     rows = query("""
-        SELECT
+        SELECT 
             c.hostname      AS computer,
             c.status,
             s.display_name,
@@ -75,7 +76,6 @@ def get_inventory():
 
 
 @inventory_bp.route("/api/choco/refresh", methods=["POST"])
-@login_required
 def refresh_choco_versions():
     stale = query("""
         SELECT DISTINCT choco_id
@@ -84,10 +84,13 @@ def refresh_choco_versions():
           AND (choco_cached_at IS NULL OR choco_cached_at < NOW() - INTERVAL '24 hours')
     """, fetch='all')
 
+    print(f"Stale packages found: {stale}")
+
     updated = 0
     for row in stale:
         pkg_id = row["choco_id"]
         latest = fetch_choco_latest(pkg_id)
+        print(f"Fetched {pkg_id}: {latest}")
         if latest:
             query("""
                 UPDATE software
@@ -107,13 +110,18 @@ def fetch_choco_latest(package_id):
         )
         r = requests.get(url, timeout=10)
 
+        # Get all versions and pick highest
         versions = re.findall(r"<d:Version[^>]*>(.*?)</d:Version>", r.text)
+
+        # Also try to find versions in the entry id format: Packages(Id='vlc',Version='3.0.23')
         id_versions = re.findall(
             rf"Packages\(Id='{re.escape(package_id)}',Version='([^']+)'\)",
             r.text, re.IGNORECASE
         )
 
         all_versions = list(set(versions + id_versions))
+        print(f"All versions for {package_id}: {all_versions}")
+
         if not all_versions:
             return None
 
@@ -128,11 +136,14 @@ def fetch_choco_latest(package_id):
 
 
 @inventory_bp.route("/api/choco/debug")
-@login_required
 def choco_debug():
     stale = query("""
         SELECT DISTINCT choco_id, choco_latest, choco_cached_at
         FROM software
         WHERE choco_id IS NOT NULL
     """, fetch='all')
-    return jsonify({"db_rows": [dict(r) for r in stale]})
+
+
+    return jsonify({
+        "db_rows": [dict(r) for r in stale],
+    })
