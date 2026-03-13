@@ -26,17 +26,19 @@ def _load_config():
         server_url = cfg.get('server_url', '').strip().rstrip('/')
         if not server_url:
             raise RuntimeError("config.json has no server_url — reinstall the agent")
-        return server_url
+        return cfg
     except FileNotFoundError:
         raise RuntimeError(f"config.json not found at {CONFIG_PATH} — reinstall the agent")
 
-SERVER_URL     = _load_config()
+_cfg       = _load_config()
+SERVER_URL = _cfg['server_url'].strip().rstrip('/')
 INSTALL_DIR    = _exe_dir
 LOG_PATH       = os.path.join(_exe_dir, 'agent.log')
 AGENT_KEY_PATH = os.path.join(_exe_dir, 'agent.key')
 
-COLLECT_INTERVAL = 600   # 10 minutes
-POLL_INTERVAL    = 60    # job polling in seconds
+COLLECT_INTERVAL  = 600
+POLL_INTERVAL     = 60
+KEY_ROTATION_DAYS = 30
 # ──────────────────────────────────────────────────────────────────────────────
 
 os.makedirs(INSTALL_DIR, exist_ok=True)
@@ -91,19 +93,81 @@ def _build_ssl_context():
 
 _ssl_ctx = None  # initialized in main() after logging is set up
 
-def get_agent_key():
+def get_agent_token():
     try:
         with open(AGENT_KEY_PATH, 'r') as f:
             return f.read().strip()
     except Exception:
         return None
 
+def save_agent_token(token):
+    with open(AGENT_KEY_PATH, 'w') as f:
+        f.write(token)
+    log(f"Agent token saved to {AGENT_KEY_PATH}")
+
 def _auth_headers(extra=None):
     headers = dict(extra or {})
-    key = get_agent_key()
-    if key:
-        headers['X-Agent-Key'] = key
+    token = get_agent_token()
+    if token:
+        headers['X-Agent-Key'] = token
     return headers
+
+def enroll_agent():
+    enrollment_password = _cfg.get('enrollment_password', '')
+    if not enrollment_password:
+        log("ERROR: No enrollment_password in config.json")
+        return False
+    hostname = socket.gethostname()
+    log(f"Enrolling {hostname}...")
+    try:
+        body = json.dumps({'hostname': hostname, 'enrollment_password': enrollment_password}).encode()
+        req  = urllib.request.Request(
+            f"{SERVER_URL}/api/enroll",
+            data=body,
+            headers={'Content-Type': 'application/json'},
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx) as r:
+            data = json.loads(r.read())
+        if data.get('ok') and data.get('token'):
+            save_agent_token(data['token'])
+            log("Enrollment successful")
+            return True
+        log(f"Enrollment failed: {data}")
+        return False
+    except Exception as e:
+        log(f"Enrollment error: {e}")
+        return False
+
+def should_rotate():
+    try:
+        import time as _time
+        mtime    = os.path.getmtime(AGENT_KEY_PATH)
+        age_days = (_time.time() - mtime) / 86400
+        return age_days >= KEY_ROTATION_DAYS
+    except Exception:
+        return False
+
+def rotate_token():
+    log("Rotating agent token...")
+    try:
+        req = urllib.request.Request(
+            f"{SERVER_URL}/api/rotate-key",
+            data=b'{}',
+            headers=_auth_headers({'Content-Type': 'application/json'}),
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx) as r:
+            data = json.loads(r.read())
+        if data.get('ok') and data.get('token'):
+            save_agent_token(data['token'])
+            log("Token rotation successful")
+            return True
+        log(f"Token rotation failed: {data}")
+        return False
+    except Exception as e:
+        log(f"Token rotation error: {e}")
+        return False
 
 def api_get(path):
     req = urllib.request.Request(f"{SERVER_URL}{path}", headers=_auth_headers())
@@ -485,6 +549,16 @@ def main():
     last_collect = 0
     config       = {}
 
+    # Enroll if no token yet
+    if not get_agent_token():
+        if not enroll_agent():
+            log("ERROR: Enrollment failed. Check enrollment_password in config.json.")
+            return
+
+    # Rotate if due
+    if should_rotate():
+        rotate_token()
+
     while True:
         now = time.time()
 
@@ -493,6 +567,8 @@ def main():
             internal_source = normalize_unc(config.get('internal_source_url'))
             collect_and_send(internal_source=internal_source)
             last_collect = time.time()
+            if should_rotate():
+                rotate_token()
 
         poll_jobs()
         time.sleep(POLL_INTERVAL)

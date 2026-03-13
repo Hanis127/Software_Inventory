@@ -22,21 +22,49 @@ def verify_password(stored, provided):
     except Exception:
         return False
 
-# ── Agent API key auth ────────────────────────────────────────────────────────
-def get_agent_key():
-    row = query("SELECT value FROM config WHERE key = 'agent_api_key'", fetch='one')
-    return row['value'] if row else None
+# ── Agent token hashing ───────────────────────────────────────────────────────
+def hash_token(token):
+    """SHA-256 hash of the raw token — fast is fine here, no need for pbkdf2."""
+    return hashlib.sha256(token.encode()).hexdigest()
 
-def verify_agent_key(req):
-    key      = req.headers.get('X-Agent-Key') or req.headers.get('Authorization', '').replace('Bearer ', '')
-    expected = get_agent_key()
-    if not expected or not key:
-        return False
-    return secrets.compare_digest(key.strip(), expected.strip())
+def generate_agent_token():
+    """Generate a new unique agent token. Returns (raw_token, token_hash, hint)."""
+    raw   = secrets.token_urlsafe(32)
+    hashed = hash_token(raw)
+    hint  = raw[:8]
+    return raw, hashed, hint
+
+# ── Agent authentication ──────────────────────────────────────────────────────
+def get_request_token(req):
+    return req.headers.get('X-Agent-Key') or req.headers.get('Authorization', '').replace('Bearer ', '').strip()
+
+def verify_agent_token(req):
+    """
+    Verify the agent token from the request.
+    Returns the computer row if valid, None otherwise.
+    Updates token_last_seen on success.
+    """
+    raw_token = get_request_token(req)
+    if not raw_token:
+        return None
+    token_hash = hash_token(raw_token)
+    row = query(
+        "SELECT id, hostname, revoked FROM computers WHERE agent_token_hash = %s",
+        (token_hash,), fetch='one'
+    )
+    if not row or row['revoked']:
+        return None
+    # Update last seen
+    query("UPDATE computers SET token_last_seen = NOW() WHERE id = %s", (row['id'],))
+    return row
 
 def is_agent_path(path):
     agent_paths = ['/api/inventory', '/api/jobs/pending', '/api/jobs/', '/api/config']
     return any(path.startswith(p) for p in agent_paths)
+
+# ── Enrollment password ───────────────────────────────────────────────────────
+def get_enrollment_password():
+    return os.environ.get('ENROLLMENT_PASSWORD', '').strip()
 
 # ── Session auth ──────────────────────────────────────────────────────────────
 def login_required(f):
@@ -53,16 +81,127 @@ def init_auth(app):
         path = request.path
         if path.startswith('/api/auth/') or path.startswith('/static/'):
             return None
-        # Agent paths: accept either a valid agent key OR a valid session
+        # Enrollment endpoint is public (protected by enrollment password instead)
+        if path == '/api/enroll':
+            return None
+        # Agent paths: accept valid per-agent token OR browser session
         if is_agent_path(path):
-            if verify_agent_key(request) or 'user_id' in session:
+            if verify_agent_token(request) or 'user_id' in session:
                 return None
-            return jsonify({'error': 'Invalid or missing agent API key'}), 401
+            return jsonify({'error': 'Invalid or missing agent token'}), 401
         # All other API paths: require session
         if 'user_id' not in session:
             if path.startswith('/api/'):
                 return jsonify({'error': 'Unauthorized'}), 401
         return None
+
+# ── Enrollment ────────────────────────────────────────────────────────────────
+@auth_bp.route('/api/enroll', methods=['POST'])
+def enroll():
+    """
+    Agent calls this on first run to get its unique token.
+    Requires the enrollment password set by the admin.
+    If the hostname is already enrolled and not revoked, returns a conflict.
+    """
+    data                = request.json or {}
+    hostname            = data.get('hostname', '').strip().upper()
+    enrollment_password = data.get('enrollment_password', '')
+
+    if not hostname:
+        return jsonify({'error': 'hostname required'}), 400
+
+    # Verify enrollment password
+    expected = get_enrollment_password()
+    if not expected:
+        return jsonify({'error': 'Enrollment not configured on server'}), 503
+    if not secrets.compare_digest(enrollment_password, expected):
+        return jsonify({'error': 'Invalid enrollment password'}), 401
+
+    # Check if already enrolled
+    existing = query(
+        "SELECT id, revoked FROM computers WHERE hostname = %s AND agent_token_hash IS NOT NULL",
+        (hostname,), fetch='one'
+    )
+    if existing:
+        if existing['revoked']:
+            return jsonify({'error': 'This agent has been revoked. Contact your administrator.'}), 403
+        return jsonify({'error': 'Already enrolled. Use /api/rotate-key to refresh token.'}), 409
+
+    # Generate unique token
+    raw_token, token_hash, hint = generate_agent_token()
+
+    # Upsert computer record with token
+    query("""
+        INSERT INTO computers (hostname, agent_token_hash, agent_token_hint, enrolled_at, token_last_seen, revoked)
+        VALUES (%s, %s, %s, NOW(), NOW(), FALSE)
+        ON CONFLICT (hostname) DO UPDATE
+        SET agent_token_hash = EXCLUDED.agent_token_hash,
+            agent_token_hint = EXCLUDED.agent_token_hint,
+            enrolled_at      = NOW(),
+            token_last_seen  = NOW(),
+            revoked          = FALSE
+    """, (hostname, token_hash, hint))
+
+    return jsonify({'ok': True, 'token': raw_token})
+
+# ── Key rotation ──────────────────────────────────────────────────────────────
+@auth_bp.route('/api/rotate-key', methods=['POST'])
+def rotate_key():
+    """
+    Agent calls this to rotate its own token.
+    Must present its current valid token.
+    Returns a new token, old one is immediately invalidated.
+    """
+    agent = verify_agent_token(request)
+    if not agent:
+        return jsonify({'error': 'Invalid or missing agent token'}), 401
+
+    raw_token, token_hash, hint = generate_agent_token()
+    query("""
+        UPDATE computers
+        SET agent_token_hash = %s, agent_token_hint = %s, enrolled_at = NOW()
+        WHERE id = %s
+    """, (token_hash, hint, agent['id']))
+
+    return jsonify({'ok': True, 'token': raw_token})
+
+# ── Admin: agent management ───────────────────────────────────────────────────
+@auth_bp.route('/api/auth/agents', methods=['GET'])
+@login_required
+def list_agents():
+    rows = query("""
+        SELECT hostname, agent_token_hint, enrolled_at, token_last_seen, revoked
+        FROM computers
+        WHERE agent_token_hash IS NOT NULL
+        ORDER BY hostname
+    """, fetch='all')
+    return jsonify([dict(r) for r in rows])
+
+@auth_bp.route('/api/auth/agents/<hostname>/revoke', methods=['POST'])
+@login_required
+def revoke_agent(hostname):
+    row = query("SELECT id FROM computers WHERE hostname = %s", (hostname,), fetch='one')
+    if not row:
+        return jsonify({'error': 'Agent not found'}), 404
+    query("UPDATE computers SET revoked = TRUE WHERE hostname = %s", (hostname,))
+    return jsonify({'ok': True})
+
+@auth_bp.route('/api/auth/agents/<hostname>/unrevoke', methods=['POST'])
+@login_required
+def unrevoke_agent(hostname):
+    row = query("SELECT id FROM computers WHERE hostname = %s", (hostname,), fetch='one')
+    if not row:
+        return jsonify({'error': 'Agent not found'}), 404
+    query("UPDATE computers SET revoked = FALSE WHERE hostname = %s", (hostname,))
+    return jsonify({'ok': True})
+
+@auth_bp.route('/api/auth/enrollment-password', methods=['GET'])
+@login_required
+def get_enrollment_password_endpoint():
+    pw = get_enrollment_password()
+    if not pw:
+        return jsonify({'password': None, 'message': 'ENROLLMENT_PASSWORD not set in server .env'})
+    return jsonify({'password': pw})
 
 # ── Auth API ──────────────────────────────────────────────────────────────────
 @auth_bp.route('/api/auth/login', methods=['POST'])
@@ -136,19 +275,3 @@ def change_password():
     pw_hash = hash_password(new_password)
     query("UPDATE users SET password_hash = %s WHERE id = %s", (pw_hash, session['user_id']))
     return jsonify({'ok': True})
-
-@auth_bp.route('/api/auth/generate-agent-key', methods=['POST'])
-@login_required
-def generate_agent_key():
-    new_key = secrets.token_urlsafe(32)
-    query("INSERT INTO config (key, value) VALUES ('agent_api_key', %s) ON CONFLICT (key) DO UPDATE SET value = %s",
-          (new_key, new_key))
-    return jsonify({'ok': True, 'key': new_key})
-
-@auth_bp.route('/api/auth/agent-key', methods=['GET'])
-@login_required
-def get_agent_key_endpoint():
-    key = get_agent_key()
-    if not key:
-        return jsonify({'key': None, 'message': 'No agent key set. Generate one first.'})
-    return jsonify({'key': key})
