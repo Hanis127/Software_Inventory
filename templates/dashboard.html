@@ -580,15 +580,19 @@
         <span id="userAddError" style="color:var(--danger);font-size:12px;margin-left:10px"></span>
       </div>
       <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
-        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Agent API Key</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Enrollment Password</div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <code id="agentKeyDisplay" style="flex:1;background:var(--bg);border:1px solid var(--border);padding:7px 10px;border-radius:4px;font-size:11px;color:var(--muted);font-family:var(--mono);word-break:break-all">click "Show Key" to reveal</code>
+          <code id="enrollmentPwDisplay" style="flex:1;background:var(--bg);border:1px solid var(--border);padding:7px 10px;border-radius:4px;font-size:11px;color:var(--muted);font-family:var(--mono);word-break:break-all">click "Show" to reveal</code>
         </div>
-        <div style="display:flex;gap:8px">
-          <button onclick="loadAgentKey()" style="padding:7px 12px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:4px;font-size:12px;cursor:pointer">Show Key</button>
-          <button onclick="generateAgentKey()" style="padding:7px 12px;background:var(--danger);color:#fff;border:none;border-radius:4px;font-size:12px;cursor:pointer">Regenerate Key</button>
-        </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:8px">Save this key to <code>C:\ProgramData\ChocoAgentgent.key</code> on each managed machine.</div>
+        <button onclick="loadEnrollmentPassword()" style="padding:7px 12px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:4px;font-size:12px;cursor:pointer">Show</button>
+        <div style="font-size:11px;color:var(--muted);margin-top:8px">Set this as <code>ENROLLMENT_PASSWORD</code> in the server .env and in the installer wizard.</div>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em">Enrolled Agents</div>
+        <div id="agentsList"></div>
+        <button onclick="loadAgents()" style="padding:6px 12px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:4px;font-size:12px;cursor:pointer;margin-top:8px">&#8635; Refresh</button>
+      </div>
       </div>
 
       <div style="border-top:1px solid var(--border);padding-top:16px;margin-top:16px">
@@ -1428,6 +1432,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function showUsersPanel() {
   document.getElementById('usersModal').classList.add('open');
   loadUsers();
+  loadAgents();
 }
 
 function closeUsersModal(e) {
@@ -1640,20 +1645,57 @@ function filterToComputer(hostname) {
 }
 
 
-async function loadAgentKey() {
-  const res  = await fetch('/api/auth/agent-key');
+async function loadEnrollmentPassword() {
+  const res  = await fetch('/api/auth/enrollment-password');
   const data = await res.json();
-  document.getElementById('agentKeyDisplay').textContent = data.key || data.message || 'No key set';
+  document.getElementById('enrollmentPwDisplay').textContent = data.password || data.message || 'Not set';
 }
 
-async function generateAgentKey() {
-  if (!confirm('Regenerate agent key? All agents will fail to connect until you deploy the new key.')) return;
-  const res  = await fetch('/api/auth/generate-agent-key', {method: 'POST'});
-  const data = await res.json();
-  if (res.ok) {
-    document.getElementById('agentKeyDisplay').textContent = data.key;
-    alert('New key generated. Save it to C:\\ProgramData\\ChocoAgent\\agent.key on each machine.');
+async function loadAgents() {
+  const res   = await fetch('/api/auth/agents');
+  const agents = await res.json();
+  const el    = document.getElementById('agentsList');
+  if (!agents.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">No enrolled agents.</div>';
+    return;
   }
+  el.innerHTML = '';
+  agents.forEach(function(a) {
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-bottom:6px;gap:10px';
+
+    var info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0';
+    var enrolled = a.enrolled_at ? new Date(a.enrolled_at).toLocaleDateString() : '—';
+    var lastSeen = a.token_last_seen ? formatLastSeen(a.token_last_seen) : 'Never';
+    var hint     = a.agent_token_hint ? '<span style="font-family:var(--mono);font-size:10px;color:var(--muted)"> token: ' + a.agent_token_hint + '...</span>' : '';
+    info.innerHTML =
+      '<div style="font-family:var(--mono);font-size:13px;' + (a.revoked ? 'color:var(--muted);text-decoration:line-through' : '') + '">' + a.hostname + hint + '</div>' +
+      '<div style="font-size:10px;color:var(--muted);margin-top:2px">enrolled: ' + enrolled + ' &nbsp;·&nbsp; last seen: ' + lastSeen + (a.revoked ? ' &nbsp;·&nbsp; <span style="color:var(--danger)">REVOKED</span>' : '') + '</div>';
+
+    var btn = document.createElement('button');
+    if (a.revoked) {
+      btn.textContent = 'Unrevoke';
+      btn.style.cssText = 'padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:3px;cursor:pointer;white-space:nowrap';
+      btn.onclick = function() { revokeAgent(a.hostname, false); };
+    } else {
+      btn.textContent = 'Revoke';
+      btn.style.cssText = 'padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--danger);color:var(--danger);border-radius:3px;cursor:pointer;white-space:nowrap';
+      btn.onclick = function() { revokeAgent(a.hostname, true); };
+    }
+
+    row.appendChild(info);
+    row.appendChild(btn);
+    el.appendChild(row);
+  });
+}
+
+async function revokeAgent(hostname, revoke) {
+  var action = revoke ? 'revoke' : 'unrevoke';
+  if (!confirm((revoke ? 'Revoke' : 'Unrevoke') + ' agent ' + hostname + '?')) return;
+  const res = await fetch('/api/auth/agents/' + encodeURIComponent(hostname) + '/' + action, { method: 'POST' });
+  if (res.ok) loadAgents();
+  else { const d = await res.json(); alert(d.error || 'Error'); }
 }
 
 </script>
