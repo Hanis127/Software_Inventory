@@ -143,15 +143,7 @@ def choco_debug():
         WHERE choco_id IS NOT NULL
     """, fetch='all')
 
-    test_7zip = fetch_choco_latest("7zip")
-    test_vlc = fetch_choco_latest("vlc")
-    test_googlechrome = fetch_choco_latest("googlechrome")
-    test_javaruntime = fetch_choco_latest("javaruntime")
 
     return jsonify({
         "db_rows": [dict(r) for r in stale],
-        "test_fetch_7zip": test_7zip,
-        "test_fetch_vlc": test_vlc,
-        "test_googlechrome": test_googlechrome,
-        "test_javaruntime": test_javaruntime
     })

@@ -67,7 +67,7 @@ def pending_jobs(hostname):
         ORDER BY j.created_at
     """, (hostname,), fetch='all')
     return jsonify([dict(r) for r in rows])
-# odsud nahoru po koment je to nove
+
 
 @jobs_bp.route("/api/jobs/<job_id>", methods=["PATCH"])
 def update_job(job_id):
