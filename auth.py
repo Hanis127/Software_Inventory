@@ -59,7 +59,9 @@ def verify_agent_token(req):
     return row
 
 def is_agent_path(path):
-    agent_paths = ['/api/inventory', '/api/jobs/pending', '/api/jobs/', '/api/config']
+    # Only paths where agents authenticate via token AND have no @login_required decorator.
+    # Jobs routes handle their own auth explicitly
+    agent_paths = ['/api/inventory', '/api/config']
     return any(path.startswith(p) for p in agent_paths)
 
 # ── Enrollment password ───────────────────────────────────────────────────────
