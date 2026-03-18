@@ -191,6 +191,37 @@
   .modal-close:hover { color: var(--text); }
   .modal-body { flex: 1; overflow-y: auto; padding: 14px 18px; }
   .modal-body pre { font-family: var(--mono); font-size: 11px; color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+
+  /* ── Notifications panel ── */
+  .notify-tabs { display:flex; gap:0; margin-bottom:16px; border:1px solid var(--border); border-radius:4px; overflow:hidden; }
+  .notify-tab  { flex:1; padding:7px 0; text-align:center; font-size:11px; font-family:var(--mono); color:var(--muted); background:var(--bg); cursor:pointer; transition:all 0.15s; border:none; }
+  .notify-tab.active  { background:var(--accent); color:var(--bg); font-weight:600; }
+  .notify-tab:not(.active):hover { background:var(--border); color:var(--text); }
+  .notify-section { display:none; }
+  .notify-section.active { display:block; }
+  .notify-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .notify-field { margin-bottom:12px; }
+  .notify-field label { display:block; font-size:10px; font-family:var(--mono); color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:5px; }
+  .notify-field input, .notify-field textarea, .notify-field select {
+    width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text);
+    padding:7px 10px; border-radius:4px; font-size:12px; font-family:var(--sans);
+    outline:none; transition:border-color 0.15s;
+  }
+  .notify-field input:focus, .notify-field textarea:focus, .notify-field select:focus { border-color:var(--accent); }
+  .notify-field textarea { resize:vertical; min-height:70px; }
+  .delay-checkboxes { display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; }
+  .delay-check { display:flex; align-items:center; gap:5px; font-size:12px; font-family:var(--mono); cursor:pointer; }
+  .delay-check input[type=checkbox] { accent-color:var(--accent); width:14px; height:14px; cursor:pointer; }
+  .active-restarts-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:12px; }
+  .active-restarts-table th { text-align:left; padding:6px 10px; font-family:var(--mono); font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); }
+  .active-restarts-table td { padding:7px 10px; border-bottom:1px solid var(--border); }
+  .active-restarts-table tr:last-child td { border-bottom:none; }
+  .urgency-info     { color:#17a2b8; }
+  .urgency-warning  { color:var(--warn); }
+  .urgency-critical { color:var(--danger); }
+  .cancel-notify-btn { padding:2px 8px; font-size:10px; font-family:var(--mono); background:transparent; border:1px solid var(--danger); color:var(--danger); border-radius:3px; cursor:pointer; transition:all 0.15s; }
+  .cancel-notify-btn:hover { background:var(--danger); color:var(--bg); }
+
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -547,6 +578,165 @@
       </div>
     </div>
 
+
+    <!-- ── Notifications & Restarts ── -->
+    <div class="panel">
+      <div class="panel-header" onclick="togglePanel(this)">
+        <div class="panel-title">
+          Notifications &amp; Restarts
+          <span class="panel-badge badge-warn" id="activeRestartsBadge">0 active</span>
+        </div>
+        <span class="panel-toggle">&#9658;</span>
+      </div>
+      <div class="panel-body" id="notifyPanelBody">
+
+        <div class="notify-tabs">
+          <button class="notify-tab active" onclick="switchNotifyTab('message', this)">Send Message</button>
+          <button class="notify-tab" onclick="switchNotifyTab('restart', this)">Schedule Restart</button>
+          <button class="notify-tab" onclick="switchNotifyTab('active', this)">Active</button>
+        </div>
+
+        <!-- ── Send Message ── -->
+        <div class="notify-section active" id="notifyMessage">
+          <div class="notify-form-grid">
+            <div>
+              <div class="notify-field">
+                <label>Title</label>
+                <input id="msgTitle" placeholder="e.g. IT Notice" maxlength="80">
+              </div>
+              <div class="notify-field">
+                <label>Message</label>
+                <textarea id="msgBody" placeholder="Enter your message to users..."></textarea>
+              </div>
+              <div class="notify-field">
+                <label>Urgency</label>
+                <select id="msgUrgency">
+                  <option value="info">ℹ️  Info</option>
+                  <option value="warning" selected>⚠️  Warning</option>
+                  <option value="critical">🚨  Critical</option>
+                </select>
+              </div>
+              <div class="notify-field">
+                <label>Send at</label>
+                <input type="datetime-local" id="msgScheduledFor">
+              </div>
+              <div class="notify-field">
+                <label>Allowed reminder delays</label>
+                <div class="delay-checkboxes" id="msgDelayOptions">
+                  <label class="delay-check"><input type="checkbox" value="15" checked> 15 min</label>
+                  <label class="delay-check"><input type="checkbox" value="60" checked> 1 h</label>
+                  <label class="delay-check"><input type="checkbox" value="240" checked> 4 h</label>
+                  <label class="delay-check"><input type="checkbox" value="1440"> 24 h</label>
+                </div>
+              </div>
+              <div class="notify-field">
+                <label>Max reminders</label>
+                <select id="msgMaxDelays">
+                  <option value="1">1×</option>
+                  <option value="2">2×</option>
+                  <option value="3" selected>3×</option>
+                  <option value="4">4×</option>
+                  <option value="99">Unlimited</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="notify-field">
+                <label>Target Computers</label>
+                <div class="btn-row" style="margin-bottom:8px">
+                  <button class="btn" onclick="notifySelectAll()">All</button>
+                  <button class="btn" onclick="notifySelectOnline()">Online only</button>
+                  <button class="btn" onclick="notifySelectNone()">Clear</button>
+                </div>
+                <div class="deploy-computer-list" id="notifyComputerList" style="max-height:280px"></div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:12px">
+            <button class="deploy-btn" onclick="sendNotification()">&#128233; Send Message</button>
+            <span id="msgStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
+          </div>
+        </div>
+
+        <!-- ── Schedule Restart ── -->
+        <div class="notify-section" id="notifyRestart">
+          <div class="notify-form-grid">
+            <div>
+              <div class="notify-field">
+                <label>Notification Title</label>
+                <input id="rstTitle" placeholder="e.g. Scheduled System Restart" maxlength="80" value="Scheduled System Restart">
+              </div>
+              <div class="notify-field">
+                <label>Message to Users</label>
+                <textarea id="rstBody" placeholder="Please save your work. Your computer will restart at the scheduled time.">Please save your work. Your computer will be restarted for scheduled maintenance. You may delay the restart using the options below.</textarea>
+              </div>
+              <div class="notify-field">
+                <label>Urgency</label>
+                <select id="rstUrgency">
+                  <option value="info">ℹ️  Info</option>
+                  <option value="warning" selected>⚠️  Warning</option>
+                  <option value="critical">🚨  Critical</option>
+                </select>
+              </div>
+              <div class="notify-field">
+                <label>Restart at (date &amp; time)</label>
+                <input type="datetime-local" id="rstRestartAt">
+              </div>
+              <div class="notify-field">
+                <label>First notification at</label>
+                <input type="datetime-local" id="rstScheduledFor">
+                <div style="font-size:10px;color:var(--muted);margin-top:3px">Leave blank to notify immediately</div>
+              </div>
+              <div class="notify-field">
+                <label>User delay options</label>
+                <div class="delay-checkboxes" id="rstDelayOptions">
+                  <label class="delay-check"><input type="checkbox" value="15" checked> 15 min</label>
+                  <label class="delay-check"><input type="checkbox" value="60" checked> 1 h</label>
+                  <label class="delay-check"><input type="checkbox" value="240" checked> 4 h</label>
+                  <label class="delay-check"><input type="checkbox" value="1440" checked> 24 h</label>
+                </div>
+                <div style="font-size:10px;color:var(--muted);margin-top:4px">Fixed reminders always fire at T-60, T-30, T-15, T-5 min regardless of delays.</div>
+              </div>
+              <div class="notify-field">
+                <label>Max delays allowed per user</label>
+                <select id="rstMaxDelays">
+                  <option value="1">1×</option>
+                  <option value="2">2×</option>
+                  <option value="3">3×</option>
+                  <option value="4" selected>4×</option>
+                  <option value="99">Unlimited</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="notify-field">
+                <label>Target Computers</label>
+                <div class="btn-row" style="margin-bottom:8px">
+                  <button class="btn" onclick="restartSelectAll()">All</button>
+                  <button class="btn" onclick="restartSelectOnline()">Online only</button>
+                  <button class="btn" onclick="restartSelectNone()">Clear</button>
+                </div>
+                <div class="deploy-computer-list" id="restartComputerList" style="max-height:340px"></div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:8px;display:flex;align-items:center;gap:12px">
+            <button class="deploy-btn" style="background:var(--warn);color:var(--bg)" onclick="scheduleRestart()">&#128257; Schedule Restart</button>
+            <span id="rstStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
+          </div>
+        </div>
+
+        <!-- ── Active ── -->
+        <div class="notify-section" id="notifyActive">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+            <button class="refresh-btn" style="font-size:11px;padding:5px 12px" onclick="loadActiveNotifications()">&#8635; Refresh</button>
+          </div>
+          <div id="activeNotifyList"><div class="empty">No active notifications.</div></div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ── Job History ── -->
     <div class="panel">
       <div class="panel-header" onclick="togglePanel(this)">
@@ -659,6 +849,8 @@ async function loadAll() {
   document.getElementById('outdatedBadge').style.outline = '';
   updateDashboard();
   renderDeployComputerLists();
+  renderNotifyComputerList('notifyComputerList', notifySelectedComputers);
+  renderNotifyComputerList('restartComputerList', restartSelectedComputers);
   document.getElementById('lastRefresh').textContent = 'Refreshed ' + new Date().toLocaleTimeString();
 }
 
@@ -1696,6 +1888,182 @@ async function revokeAgent(hostname, revoke) {
   const res = await fetch('/api/auth/agents/' + encodeURIComponent(hostname) + '/' + action, { method: 'POST' });
   if (res.ok) loadAgents();
   else { const d = await res.json(); alert(d.error || 'Error'); }
+}
+
+// ── Notifications & Restarts ──────────────────────────────────────────────────
+var notifySelectedComputers  = new Set();
+var restartSelectedComputers = new Set();
+
+function switchNotifyTab(tab, btn) {
+  document.querySelectorAll('.notify-tab').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('.notify-section').forEach(function(s) { s.classList.remove('active'); });
+  btn.classList.add('active');
+  var map = { message:'notifyMessage', restart:'notifyRestart', active:'notifyActive' };
+  document.getElementById(map[tab]).classList.add('active');
+  if (tab === 'active') loadActiveNotifications();
+}
+
+function renderNotifyComputerList(containerId, selectedSet) {
+  var list = document.getElementById(containerId);
+  list.innerHTML = '';
+  allComputers.forEach(function(c) {
+    var div = document.createElement('div');
+    div.className = 'deploy-computer-item' + (selectedSet.has(c.hostname) ? ' selected' : '');
+    div.innerHTML =
+      '<span class="status-dot ' + (c.status === 'online' ? 'dot-online' : 'dot-offline') + '"></span>' +
+      '<div style="display:flex;flex-direction:column;flex:1;overflow:hidden;">' +
+        '<span class="item-name">' + c.hostname + '</span>' +
+        '<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + formatLastSeen(c.last_seen) + '</span>' +
+      '</div>';
+    div.onclick = function() {
+      if (selectedSet.has(c.hostname)) selectedSet.delete(c.hostname);
+      else selectedSet.add(c.hostname);
+      renderNotifyComputerList(containerId, selectedSet);
+    };
+    list.appendChild(div);
+  });
+}
+
+function notifySelectAll()    { allComputers.forEach(function(c){notifySelectedComputers.add(c.hostname);}); renderNotifyComputerList('notifyComputerList', notifySelectedComputers); }
+function notifySelectOnline() { notifySelectedComputers.clear(); allComputers.filter(function(c){return c.status==='online';}).forEach(function(c){notifySelectedComputers.add(c.hostname);}); renderNotifyComputerList('notifyComputerList', notifySelectedComputers); }
+function notifySelectNone()   { notifySelectedComputers.clear(); renderNotifyComputerList('notifyComputerList', notifySelectedComputers); }
+
+function restartSelectAll()    { allComputers.forEach(function(c){restartSelectedComputers.add(c.hostname);}); renderNotifyComputerList('restartComputerList', restartSelectedComputers); }
+function restartSelectOnline() { restartSelectedComputers.clear(); allComputers.filter(function(c){return c.status==='online';}).forEach(function(c){restartSelectedComputers.add(c.hostname);}); renderNotifyComputerList('restartComputerList', restartSelectedComputers); }
+function restartSelectNone()   { restartSelectedComputers.clear(); renderNotifyComputerList('restartComputerList', restartSelectedComputers); }
+
+function getCheckedDelays(containerId) {
+  return Array.from(document.querySelectorAll('#' + containerId + ' input[type=checkbox]:checked'))
+    .map(function(cb) { return parseInt(cb.value); });
+}
+
+function localDatetimeToISO(val) {
+  if (!val) return null;
+  return new Date(val).toISOString();
+}
+
+async function sendNotification() {
+  var title    = document.getElementById('msgTitle').value.trim();
+  var body     = document.getElementById('msgBody').value.trim();
+  var urgency  = document.getElementById('msgUrgency').value;
+  var sf       = document.getElementById('msgScheduledFor').value;
+  var delays   = getCheckedDelays('msgDelayOptions');
+  var maxD     = parseInt(document.getElementById('msgMaxDelays').value);
+  var computers = Array.from(notifySelectedComputers);
+  var statusEl = document.getElementById('msgStatus');
+
+  if (!title || !body)       { statusEl.textContent = 'Title and message required'; statusEl.style.color='var(--danger)'; return; }
+  if (!computers.length)     { statusEl.textContent = 'Select at least one computer'; statusEl.style.color='var(--danger)'; return; }
+
+  statusEl.textContent = 'Sending...'; statusEl.style.color = 'var(--muted)';
+  try {
+    var res  = await fetch('/api/notify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        action: 'notify', computers: computers,
+        notify_title: title, notify_message: body, urgency: urgency,
+        scheduled_for: localDatetimeToISO(sf),
+        delay_options: delays, max_delays: maxD
+      })
+    });
+    var data = await res.json();
+    if (res.ok) {
+      statusEl.textContent = 'Sent to ' + data.queued + ' computer(s)' + (data.skipped.length ? ' (' + data.skipped.length + ' not found)' : '');
+      statusEl.style.color = 'var(--accent)';
+    } else {
+      statusEl.textContent = data.error || 'Error'; statusEl.style.color = 'var(--danger)';
+    }
+  } catch(e) { statusEl.textContent = 'Connection error'; statusEl.style.color = 'var(--danger)'; }
+}
+
+async function scheduleRestart() {
+  var title     = document.getElementById('rstTitle').value.trim();
+  var body      = document.getElementById('rstBody').value.trim();
+  var urgency   = document.getElementById('rstUrgency').value;
+  var restartAt = document.getElementById('rstRestartAt').value;
+  var sf        = document.getElementById('rstScheduledFor').value;
+  var delays    = getCheckedDelays('rstDelayOptions');
+  var maxD      = parseInt(document.getElementById('rstMaxDelays').value);
+  var computers = Array.from(restartSelectedComputers);
+  var statusEl  = document.getElementById('rstStatus');
+
+  if (!title || !body)   { statusEl.textContent = 'Title and message required'; statusEl.style.color='var(--danger)'; return; }
+  if (!restartAt)        { statusEl.textContent = 'Restart time required'; statusEl.style.color='var(--danger)'; return; }
+  if (!computers.length) { statusEl.textContent = 'Select at least one computer'; statusEl.style.color='var(--danger)'; return; }
+
+  var restartISO = localDatetimeToISO(restartAt);
+  var sfISO      = localDatetimeToISO(sf);
+
+  if (!confirm('Schedule restart for ' + computers.length + ' computer(s) at ' + new Date(restartISO).toLocaleString() + '?')) return;
+
+  statusEl.textContent = 'Scheduling...'; statusEl.style.color = 'var(--muted)';
+  try {
+    var res  = await fetch('/api/notify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        action: 'scheduled_restart', computers: computers,
+        notify_title: title, notify_message: body, urgency: urgency,
+        scheduled_for: sfISO, restart_at: restartISO,
+        delay_options: delays, max_delays: maxD
+      })
+    });
+    var data = await res.json();
+    if (res.ok) {
+      statusEl.textContent = 'Scheduled for ' + data.queued + ' computer(s)';
+      statusEl.style.color = 'var(--accent)';
+      loadActiveNotifications();
+    } else {
+      statusEl.textContent = data.error || 'Error'; statusEl.style.color = 'var(--danger)';
+    }
+  } catch(e) { statusEl.textContent = 'Connection error'; statusEl.style.color = 'var(--danger)'; }
+}
+
+async function loadActiveNotifications() {
+  try {
+    var res  = await fetch('/api/notify/active');
+    var jobs = await res.json();
+    var el   = document.getElementById('activeNotifyList');
+    document.getElementById('activeRestartsBadge').textContent = jobs.length + ' active';
+
+    if (!jobs.length) { el.innerHTML = '<div class="empty">No active notifications or restarts.</div>'; return; }
+
+    var table = '<table class="active-restarts-table"><thead><tr>' +
+      '<th>Computer</th><th>Type</th><th>Title</th><th>Urgency</th>' +
+      '<th>First Notify</th><th>Restart At</th><th>Delays</th><th>Action</th>' +
+      '</tr></thead><tbody>';
+
+    jobs.forEach(function(j) {
+      var urgClass = 'urgency-' + (j.urgency || 'warning');
+      var restartAt = j.restart_at ? new Date(j.restart_at).toLocaleString() : '—';
+      var scheduledFor = j.scheduled_for ? new Date(j.scheduled_for).toLocaleString() : '—';
+      var delays = (j.delay_count || 0) + ' / ' + (j.max_delays || 4);
+      var typeLabel = j.action === 'scheduled_restart'
+        ? '<span style="color:var(--warn);font-family:var(--mono);font-size:10px">RESTART</span>'
+        : '<span style="color:var(--accent2);font-family:var(--mono);font-size:10px">MESSAGE</span>';
+      table +=
+        '<tr>' +
+        '<td><span class="computer-pill">' + j.hostname + '</span></td>' +
+        '<td>' + typeLabel + '</td>' +
+        '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (j.notify_title||'') + '">' + (j.notify_title||'—') + '</td>' +
+        '<td class="' + urgClass + '" style="font-family:var(--mono);font-size:10px">' + (j.urgency||'') + '</td>' +
+        '<td style="font-family:var(--mono);font-size:11px;color:var(--muted)">' + scheduledFor + '</td>' +
+        '<td style="font-family:var(--mono);font-size:11px;color:var(--warn)">' + restartAt + '</td>' +
+        '<td style="font-family:var(--mono);font-size:11px">' + delays + '</td>' +
+        '<td><button class="cancel-notify-btn" onclick="cancelNotification(' + JSON.stringify(j.id) + ')">Cancel</button></td>' +
+        '</tr>';
+    });
+    table += '</tbody></table>';
+    el.innerHTML = table;
+  } catch(e) { console.error('loadActiveNotifications', e); }
+}
+
+async function cancelNotification(jobId) {
+  if (!confirm('Cancel this notification/restart?')) return;
+  var res = await fetch('/api/notify/' + jobId + '/cancel', {method:'POST'});
+  if (res.ok) loadActiveNotifications();
+  else { var d = await res.json(); alert(d.error || 'Error'); }
 }
 
 </script>
