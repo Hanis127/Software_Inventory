@@ -59,8 +59,15 @@ def verify_agent_token(req):
     return row
 
 def is_agent_path(path):
-    agent_paths = ['/api/inventory', '/api/jobs/pending', '/api/jobs/', '/api/config']
+    # Only paths where agents authenticate via token AND have no @login_required decorator.
+    # Jobs and notify routes handle their own auth explicitly -- do NOT add them here.
+    agent_paths = ['/api/inventory', '/api/config']
     return any(path.startswith(p) for p in agent_paths)
+
+def is_self_auth_path(path):
+    # Paths that handle their own auth internally -- bypass before_request check.
+    self_auth = ['/api/jobs/', '/api/jobs', '/api/notify/']
+    return any(path.startswith(p) for p in self_auth)
 
 # ── Enrollment password ───────────────────────────────────────────────────────
 def get_enrollment_password():
@@ -81,8 +88,11 @@ def init_auth(app):
         path = request.path
         if path.startswith('/api/auth/') or path.startswith('/static/'):
             return None
-        # Enrollment endpoint is public (protected by enrollment password instead)
-        if path == '/api/enroll':
+        # Enrollment and rotation endpoints are public (self-protected)
+        if path in ('/api/enroll', '/api/rotate-key'):
+            return None
+        # Routes that handle their own auth internally
+        if is_self_auth_path(path):
             return None
         # Agent paths: accept valid per-agent token OR browser session
         if is_agent_path(path):
@@ -122,10 +132,13 @@ def enroll():
         "SELECT id, revoked FROM computers WHERE hostname = %s AND agent_token_hash IS NOT NULL",
         (hostname,), fetch='one'
     )
+    force = data.get('force', False)
     if existing:
         if existing['revoked']:
             return jsonify({'error': 'This agent has been revoked. Contact your administrator.'}), 403
-        return jsonify({'error': 'Already enrolled. Use /api/rotate-key to refresh token.'}), 409
+        if not force:
+            return jsonify({'error': 'Already enrolled. Use /api/rotate-key to refresh token, or re-enroll with force=true if agent.key was lost.'}), 409
+        # force=true: wipe old token and re-enroll (enrollment password already verified above)
 
     # Generate unique token
     raw_token, token_hash, hint = generate_agent_token()
