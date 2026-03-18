@@ -5,6 +5,7 @@ import time
 import subprocess
 import socket
 import os
+import threading
 import logging
 import winreg
 import re
@@ -38,6 +39,7 @@ AGENT_KEY_PATH = os.path.join(_exe_dir, 'agent.key')
 
 COLLECT_INTERVAL  = 600
 POLL_INTERVAL     = 60
+NOTIFY_INTERVAL   = 60    # check for notifications every 60s
 KEY_ROTATION_DAYS = 30
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -65,10 +67,9 @@ def api_post(path, data):
     with urllib.request.urlopen(req, timeout=10, context=_ssl_ctx) as r:
         return json.loads(r.read())
 
-# SSL context that pins trust to the specific server certificate.
-# Place server_cert.pem (copy of server_cert.pem from the Flask server) alongside agent.exe.
-# This is more secure than a CA-signed cert for internal use — the agent will only
-# talk to a server presenting exactly this certificate.
+# SSL context that loads trusted certs from the Windows certificate store (CERTLM).
+# Install server_cert.pem into the Windows Trusted Root CA store via your installer,
+# then Python's ssl module will trust it automatically through the OS store.
 def _build_ssl_context():
     # Prefer pinning to the exact cert file — most reliable for self-signed certs.
     cert_candidates = [
@@ -119,8 +120,12 @@ def enroll_agent():
         return False
     hostname = socket.gethostname()
     log(f"Enrolling {hostname}...")
-    try:
-        body = json.dumps({'hostname': hostname, 'enrollment_password': enrollment_password}).encode()
+
+    def _do_enroll(force=False):
+        payload = {'hostname': hostname, 'enrollment_password': enrollment_password}
+        if force:
+            payload['force'] = True
+        body = json.dumps(payload).encode()
         req  = urllib.request.Request(
             f"{SERVER_URL}/api/enroll",
             data=body,
@@ -128,12 +133,36 @@ def enroll_agent():
             method='POST'
         )
         with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx) as r:
-            data = json.loads(r.read())
+            return json.loads(r.read())
+
+    try:
+        data = _do_enroll()
         if data.get('ok') and data.get('token'):
             save_agent_token(data['token'])
             log("Enrollment successful")
             return True
         log(f"Enrollment failed: {data}")
+        return False
+    except urllib.error.HTTPError as e:
+        if e.code == 409:
+            # Already enrolled but agent.key is missing — force re-enroll
+            log("Hostname already enrolled but agent.key missing — retrying with force=true")
+            try:
+                data = _do_enroll(force=True)
+                if data.get('ok') and data.get('token'):
+                    save_agent_token(data['token'])
+                    log("Force re-enrollment successful")
+                    return True
+                log(f"Force re-enrollment failed: {data}")
+            except Exception as e2:
+                log(f"Force re-enrollment error: {e2}")
+            return False
+        elif e.code == 401:
+            log("ERROR: Enrollment password is incorrect. Check enrollment_password in config.json matches ENROLLMENT_PASSWORD in server .env.")
+        elif e.code == 403:
+            log("ERROR: This agent has been revoked. Contact your administrator.")
+        else:
+            log(f"Enrollment error: HTTP {e.code}: {e.reason}")
         return False
     except Exception as e:
         log(f"Enrollment error: {e}")
@@ -511,6 +540,10 @@ def poll_jobs():
             package_id = job.get('package_id', '')
             source_url = normalize_unc(job.get('source_url'))
 
+            # Notification/restart jobs are handled by poll_notifications, not choco
+            if action in ('notify', 'scheduled_restart'):
+                continue
+
             # Validate before executing anything
             if not validate_package_id(package_id):
                 log(f"SECURITY: Rejecting job {job['id']} - invalid package_id: {repr(package_id)}")
@@ -541,7 +574,255 @@ def poll_jobs():
         log(f"Job poll error: {e}")
 
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
+# ── Notifications ─────────────────────────────────────────────────────────────
+# Track popups already showing so we don't spawn duplicates
+_active_popups      = set()
+_active_popups_lock = threading.Lock()
+
+def poll_notifications():
+    """Check server for due notifications and scheduled restarts."""
+    hostname = socket.gethostname()
+    try:
+        req = urllib.request.Request(
+            f"{SERVER_URL}/api/notify/pending/{hostname}",
+            headers=_auth_headers(),
+            method='GET'
+        )
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx) as r:
+            jobs = json.loads(r.read())
+    except Exception as e:
+        log(f"Notification poll error: {e}")
+        return
+
+    for job in jobs:
+        job_id = job.get('id')
+        with _active_popups_lock:
+            if job_id in _active_popups:
+                continue   # popup already showing for this job
+            _active_popups.add(job_id)
+        t = threading.Thread(
+            target=_handle_notification_thread,
+            args=(job,),
+            daemon=True
+        )
+        t.start()
+
+
+def _handle_notification_thread(job):
+    """Runs in a background thread - never blocks the main loop."""
+    try:
+        handle_notification(job)
+    except Exception as e:
+        log(f"Notification handle error {job.get('id')}: {e}")
+    finally:
+        with _active_popups_lock:
+            _active_popups.discard(job.get('id'))
+
+
+def _launch_in_user_session(exe_path, arg):
+    # Launch exe in the active user desktop session from a service (Session 0).
+    # Pure ctypes implementation -- no pywin32 required.
+    import ctypes
+    import ctypes.wintypes
+    import tempfile
+
+    kernel32  = ctypes.windll.kernel32
+    wtsapi32  = ctypes.windll.wtsapi32
+    advapi32  = ctypes.windll.advapi32
+    userenv   = ctypes.windll.userenv
+
+    # Constants
+    INFINITE                   = 0xFFFFFFFF
+    NORMAL_PRIORITY_CLASS      = 0x00000020
+    CREATE_NO_WINDOW           = 0x08000000
+    CREATE_UNICODE_ENVIRONMENT = 0x00000400
+    TokenPrimary               = 1
+    SecurityImpersonation      = 2
+
+    class STARTUPINFO(ctypes.Structure):
+        _fields_ = [
+            ("cb",              ctypes.wintypes.DWORD),
+            ("lpReserved",      ctypes.wintypes.LPWSTR),
+            ("lpDesktop",       ctypes.wintypes.LPWSTR),
+            ("lpTitle",         ctypes.wintypes.LPWSTR),
+            ("dwX",             ctypes.wintypes.DWORD),
+            ("dwY",             ctypes.wintypes.DWORD),
+            ("dwXSize",         ctypes.wintypes.DWORD),
+            ("dwYSize",         ctypes.wintypes.DWORD),
+            ("dwXCountChars",   ctypes.wintypes.DWORD),
+            ("dwYCountChars",   ctypes.wintypes.DWORD),
+            ("dwFillAttribute", ctypes.wintypes.DWORD),
+            ("dwFlags",         ctypes.wintypes.DWORD),
+            ("wShowWindow",     ctypes.wintypes.WORD),
+            ("cbReserved2",     ctypes.wintypes.WORD),
+            ("lpReserved2",     ctypes.c_char_p),
+            ("hStdInput",       ctypes.wintypes.HANDLE),
+            ("hStdOutput",      ctypes.wintypes.HANDLE),
+            ("hStdError",       ctypes.wintypes.HANDLE),
+        ]
+
+    class PROCESS_INFORMATION(ctypes.Structure):
+        _fields_ = [
+            ("hProcess",    ctypes.wintypes.HANDLE),
+            ("hThread",     ctypes.wintypes.HANDLE),
+            ("dwProcessId", ctypes.wintypes.DWORD),
+            ("dwThreadId",  ctypes.wintypes.DWORD),
+        ]
+
+    result_file = tempfile.mktemp(suffix=".txt", prefix="notify_result_")
+    hToken      = ctypes.wintypes.HANDLE()
+    hDupToken   = ctypes.wintypes.HANDLE()
+
+    try:
+        # Get active console session
+        session_id = kernel32.WTSGetActiveConsoleSessionId()
+        if session_id == 0xFFFFFFFF:
+            raise RuntimeError("No active console session")
+
+        # Get user token for that session
+        if not wtsapi32.WTSQueryUserToken(session_id, ctypes.byref(hToken)):
+            raise RuntimeError(f"WTSQueryUserToken failed: {ctypes.GetLastError()}")
+
+        # Duplicate as primary token
+        if not advapi32.DuplicateTokenEx(
+            hToken, 0x02000000, None, SecurityImpersonation,
+            TokenPrimary, ctypes.byref(hDupToken)
+        ):
+            raise RuntimeError(f"DuplicateTokenEx failed: {ctypes.GetLastError()}")
+
+        # Build environment block for user
+        lpEnv = ctypes.c_void_p()
+        userenv.CreateEnvironmentBlock(ctypes.byref(lpEnv), hDupToken, False)
+
+        si = STARTUPINFO()
+        si.cb        = ctypes.sizeof(STARTUPINFO)
+        si.lpDesktop = "winsta0\\default"
+        pi = PROCESS_INFORMATION()
+
+        arg_escaped = arg.replace('"', '\\"')
+        cmd = f'"{exe_path}" "{arg_escaped}" --result-file "{result_file}"'
+
+        log(f"Launching popup in user session {session_id}")
+
+        if not advapi32.CreateProcessAsUserW(
+            hDupToken, None, cmd,
+            None, None, False,
+            NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
+            lpEnv, None, ctypes.byref(si), ctypes.byref(pi)
+        ):
+            raise RuntimeError(f"CreateProcessAsUserW failed: {ctypes.GetLastError()}")
+
+        kernel32.WaitForSingleObject(pi.hProcess, INFINITE)
+        kernel32.CloseHandle(pi.hProcess)
+        kernel32.CloseHandle(pi.hThread)
+
+        result_text = ""
+        if os.path.exists(result_file):
+            with open(result_file, "r") as f:
+                result_text = f.read().strip()
+        return result_text
+
+    except RuntimeError:
+        raise
+    except Exception as e:
+        raise RuntimeError(f"ctypes session launch error: {e}")
+    finally:
+        if hToken.value:
+            kernel32.CloseHandle(hToken)
+        if hDupToken.value:
+            kernel32.CloseHandle(hDupToken)
+        try:
+            if os.path.exists(result_file):
+                os.unlink(result_file)
+        except Exception:
+            pass
+
+
+def handle_notification(job):
+    import subprocess
+    job_id       = job["id"]
+    deliver_as   = job.get("deliver_as", "notify")
+    reminder_lbl = job.get("reminder_label")
+
+    log(f"Notification {job_id} deliver_as={deliver_as} urgency={job.get('urgency')}")
+
+    popup_exe = os.path.join(_exe_dir, "notify_popup", "notify_popup.exe")
+    if not getattr(sys, "frozen", False):
+        popup_exe = os.path.join(_exe_dir, "notify_popup.py")
+    payload   = json.dumps(job)
+
+    log(f"Notification {job_id}: launching popup from {popup_exe}")
+    if not os.path.exists(popup_exe):
+        log(f"ERROR: popup not found at {popup_exe}")
+        ack_notification(job_id, "dismissed", reminder_lbl)
+        return
+
+    result = "dismissed"
+    try:
+        result = _launch_in_user_session(popup_exe, payload)
+        if not result:
+            log(f"Notification {job_id}: popup returned no output")
+            result = "dismissed"
+    except RuntimeError as e:
+        log(f"Notification {job_id}: user session launch failed ({e}), trying direct")
+        try:
+            cmd  = [popup_exe, payload] if getattr(sys, "frozen", False) \
+                   else [sys.executable, popup_exe, payload]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            result = proc.stdout.strip() or "dismissed"
+            if proc.returncode != 0:
+                log(f"Notification {job_id}: stderr: {proc.stderr.strip()[:300]}")
+        except Exception as e2:
+            log(f"Popup direct launch error: {e2}")
+    except Exception as e:
+        log(f"Popup launch error: {e}")
+
+    log(f"Notification {job_id} result: {result}")
+    ack_notification(job_id, result, reminder_lbl)
+
+    if result == "do_restart":
+        log("Executing scheduled restart...")
+        subprocess.run(
+            ["shutdown", "/r", "/t", "30", "/c",
+             "Scheduled system restart by IT. Restarting in 30 seconds."],
+            capture_output=True
+        )
+
+
+def ack_notification(job_id, result, reminder_label=None):
+    delay_mins = None
+    if result.startswith('delay:'):
+        try:
+            delay_mins = int(result.split(':')[1])
+        except ValueError:
+            delay_mins = 60
+        result = 'delay'
+
+    # dismissed means popup closed without action - treat as confirmed for notify
+    # so the job doesn't stay stuck as pending forever
+    if result == 'dismissed':
+        result = 'confirmed'
+
+    body = {'result': result}
+    if delay_mins:
+        body['delay_minutes'] = delay_mins
+    if reminder_label:
+        body['reminder_label'] = reminder_label
+
+    try:
+        data = json.dumps(body).encode()
+        req  = urllib.request.Request(
+            f"{SERVER_URL}/api/notify/{job_id}/ack",
+            data=data,
+            headers=_auth_headers({'Content-Type': 'application/json'}),
+            method='POST'
+        )
+        with urllib.request.urlopen(req, timeout=15, context=_ssl_ctx) as r:
+            pass
+    except Exception as e:
+        log(f"Ack error for {job_id}: {e}")
+
+
 def main():
     global _ssl_ctx
     _ssl_ctx = _build_ssl_context()
@@ -571,6 +852,7 @@ def main():
                 rotate_token()
 
         poll_jobs()
+        poll_notifications()
         time.sleep(POLL_INTERVAL)
 
 if __name__ == "__main__":
