@@ -54,6 +54,26 @@ def create_bulk_jobs():
     return jsonify({'ok': True, 'queued': len(job_ids),
                     'job_ids': job_ids, 'skipped': skipped})
 
+@jobs_bp.route('/api/jobs/completed', methods=['DELETE'])
+@login_required
+def delete_completed_jobs():
+    result = query("""
+        DELETE FROM jobs WHERE status IN ('done', 'failed', 'cancelled')
+        RETURNING id
+    """, fetch='all')
+    return jsonify({'ok': True, 'deleted': len(result) if result else 0})
+
+@jobs_bp.route('/api/jobs/<job_id>', methods=['DELETE'])
+@login_required
+def delete_job(job_id):
+    row = query("SELECT id, status FROM jobs WHERE id = %s", (job_id,), fetch='one')
+    if not row:
+        return jsonify({'error': 'Job not found'}), 404
+    if row['status'] in ('pending', 'running'):
+        return jsonify({'error': 'Cannot delete a pending or running job — cancel it first'}), 400
+    query("DELETE FROM jobs WHERE id = %s", (job_id,))
+    return jsonify({'ok': True})
+
 @jobs_bp.route('/api/jobs/<job_id>/cancel', methods=['POST'])
 @login_required
 def cancel_job(job_id):
@@ -74,13 +94,25 @@ def get_job(job_id):
 @jobs_bp.route('/api/jobs', methods=['GET'])
 @login_required
 def list_jobs():
-    rows = query("""
-        SELECT j.*, c.hostname
-        FROM jobs j
-        JOIN computers c ON c.id = j.computer_id
-        ORDER BY j.created_at DESC
-        LIMIT 100
-    """, fetch='all')
+    limit  = min(int(request.args.get('limit', 100)), 1000)
+    status = request.args.get('status', '').strip()
+    if status:
+        rows = query("""
+            SELECT j.*, c.hostname
+            FROM jobs j
+            JOIN computers c ON c.id = j.computer_id
+            WHERE j.status = %s
+            ORDER BY j.created_at DESC
+            LIMIT %s
+        """, (status, limit), fetch='all')
+    else:
+        rows = query("""
+            SELECT j.*, c.hostname
+            FROM jobs j
+            JOIN computers c ON c.id = j.computer_id
+            ORDER BY j.created_at DESC
+            LIMIT %s
+        """, (limit,), fetch='all')
     return jsonify([dict(r) for r in rows])
 
 # ── Agent-only routes (require valid agent token) ─────────────────────────────

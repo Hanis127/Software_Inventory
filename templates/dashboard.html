@@ -557,6 +557,15 @@
         <span class="panel-toggle">&#9658;</span>
       </div>
       <div class="panel-body open">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+            <select id="pkgPageSize" onchange="pkgGoToPage(1)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;cursor:pointer">
+              <option value="50">50 per page</option>
+              <option value="100" selected>100 per page</option>
+              <option value="250">250 per page</option>
+            </select>
+            <div id="pkgPagination" style="display:flex;align-items:center;gap:4px"></div>
+            <span id="pkgPageInfo" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+          </div>
         <div class="table-wrap">
           <table id="dataTable">
             <thead>
@@ -745,7 +754,27 @@
         <div class="panel-title">Job History<span class="panel-badge badge-ok" id="jobBadge">0 jobs</span></div>
         <span class="panel-toggle">&#9658;</span>
       </div>
-      <div class="panel-body" id="jobHistoryBody"><div class="empty">No jobs yet.</div></div>
+      <div class="panel-body" id="jobHistoryBody">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+          <select id="jobStatusFilter" onchange="jobsGoToPage(1)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;cursor:pointer">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="running">Running</option>
+            <option value="done">Done</option>
+            <option value="failed">Failed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="jobPageSize" onchange="jobsGoToPage(1)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;cursor:pointer">
+            <option value="25">25 per page</option>
+            <option value="50" selected>50 per page</option>
+            <option value="100">100 per page</option>
+          </select>
+          <div id="jobsPagination" style="display:flex;align-items:center;gap:4px"></div>
+          <span id="jobsPageInfo" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
+          <button onclick="deleteCompletedJobs()" style="padding:5px 12px;font-size:11px;font-family:var(--mono);background:transparent;border:1px solid var(--danger);color:var(--danger);border-radius:3px;cursor:pointer;margin-left:auto" onmouseover="this.style.background='var(--danger)';this.style.color='var(--bg)'" onmouseout="this.style.background='transparent';this.style.color='var(--danger)'">&#10005; Delete completed</button>
+        </div>
+        <div id="jobHistoryContent"><div class="empty">No jobs yet.</div></div>
+      </div>
     </div>
   </div>
 </div>
@@ -874,13 +903,88 @@ async function loadInventory() {
   } catch(e) { console.error('loadInventory', e); }
 }
 
+var jobsCurrentPage = 1;
+
 async function loadJobs() {
   try {
-    var r = await fetch('/api/jobs');
-    allJobs = await r.json();
-    renderJobHistory();
+    var status = document.getElementById('jobStatusFilter') ? document.getElementById('jobStatusFilter').value : '';
+    var url    = '/api/jobs?limit=2000' + (status ? '&status=' + status : '');
+    var r      = await fetch(url);
+    allJobs    = await r.json();
     document.getElementById('jobBadge').textContent = allJobs.length + ' jobs';
+    renderJobHistory();
   } catch(e) { console.error('loadJobs', e); }
+}
+
+function jobsGoToPage(page) {
+  jobsCurrentPage = page;
+  renderJobHistory();
+}
+
+function renderJobPagination(totalJobs, pageSize, currentPage) {
+  var totalPages = Math.max(1, Math.ceil(totalJobs / pageSize));
+  var container  = document.getElementById('jobsPagination');
+  var info       = document.getElementById('jobsPageInfo');
+  if (!container) return;
+
+  var start = (currentPage - 1) * pageSize + 1;
+  var end   = Math.min(currentPage * pageSize, totalJobs);
+  info.textContent = totalJobs ? (start + '-' + end + ' of ' + totalJobs) : '';
+
+  container.innerHTML = '';
+  var btnStyle = 'padding:3px 8px;font-size:11px;font-family:var(--mono);border-radius:3px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--muted);';
+  var activeBtnStyle = btnStyle + 'background:var(--accent);color:var(--bg);border-color:var(--accent);';
+
+  // Prev
+  var prev = document.createElement('button');
+  prev.textContent = '‹';
+  prev.style.cssText = btnStyle;
+  prev.disabled = currentPage <= 1;
+  prev.onclick = function() { jobsGoToPage(currentPage - 1); };
+  container.appendChild(prev);
+
+  // Page numbers — show window of 5 around current
+  var startPage = Math.max(1, currentPage - 2);
+  var endPage   = Math.min(totalPages, startPage + 4);
+  if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+
+  if (startPage > 1) {
+    var b = document.createElement('button'); b.textContent = '1';
+    b.style.cssText = btnStyle; b.onclick = function() { jobsGoToPage(1); };
+    container.appendChild(b);
+    if (startPage > 2) {
+      var dots = document.createElement('span');
+      dots.textContent = '…'; dots.style.cssText = 'color:var(--muted);font-size:11px;padding:0 2px';
+      container.appendChild(dots);
+    }
+  }
+
+  for (var p = startPage; p <= endPage; p++) {
+    var b = document.createElement('button');
+    b.textContent = p;
+    b.style.cssText = p === currentPage ? activeBtnStyle : btnStyle;
+    b.onclick = (function(pg) { return function() { jobsGoToPage(pg); }; })(p);
+    container.appendChild(b);
+  }
+
+  if (endPage < totalPages) {
+    if (endPage < totalPages - 1) {
+      var dots = document.createElement('span');
+      dots.textContent = '…'; dots.style.cssText = 'color:var(--muted);font-size:11px;padding:0 2px';
+      container.appendChild(dots);
+    }
+    var b = document.createElement('button'); b.textContent = totalPages;
+    b.style.cssText = btnStyle; b.onclick = function() { jobsGoToPage(totalPages); };
+    container.appendChild(b);
+  }
+
+  // Next
+  var next = document.createElement('button');
+  next.textContent = '›';
+  next.style.cssText = btnStyle;
+  next.disabled = currentPage >= totalPages;
+  next.onclick = function() { jobsGoToPage(currentPage + 1); };
+  container.appendChild(next);
 }
 
 async function loadInternalPackages() {
@@ -951,6 +1055,74 @@ function getStatus(r) {
 
 function isOutdated(r) { return getStatus(r).outdated; }
 
+var pkgCurrentPage = 1;
+
+function pkgGoToPage(page) {
+  pkgCurrentPage = page;
+  renderTablePage();
+}
+
+function renderPkgPagination(total, pageSize, currentPage) {
+  var totalPages = Math.max(1, Math.ceil(total / pageSize));
+  var container  = document.getElementById('pkgPagination');
+  var info       = document.getElementById('pkgPageInfo');
+  if (!container) return;
+
+  var start = (currentPage - 1) * pageSize + 1;
+  var end   = Math.min(currentPage * pageSize, total);
+  info.textContent = total ? (start + '-' + end + ' of ' + total) : '';
+
+  container.innerHTML = '';
+  var btnStyle       = 'padding:3px 8px;font-size:11px;font-family:var(--mono);border-radius:3px;cursor:pointer;border:1px solid var(--border);background:var(--bg);color:var(--muted);';
+  var activeBtnStyle = btnStyle + 'background:var(--accent);color:var(--bg);border-color:var(--accent);';
+
+  var prev = document.createElement('button');
+  prev.textContent = '‹'; prev.style.cssText = btnStyle;
+  prev.disabled = currentPage <= 1;
+  prev.onclick = function() { pkgGoToPage(currentPage - 1); };
+  container.appendChild(prev);
+
+  var startPage = Math.max(1, currentPage - 2);
+  var endPage   = Math.min(totalPages, startPage + 4);
+  if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+
+  if (startPage > 1) {
+    var b = document.createElement('button'); b.textContent = '1';
+    b.style.cssText = btnStyle; b.onclick = function() { pkgGoToPage(1); };
+    container.appendChild(b);
+    if (startPage > 2) {
+      var dots = document.createElement('span');
+      dots.textContent = '…'; dots.style.cssText = 'color:var(--muted);font-size:11px;padding:0 2px';
+      container.appendChild(dots);
+    }
+  }
+
+  for (var p = startPage; p <= endPage; p++) {
+    var b = document.createElement('button');
+    b.textContent = p;
+    b.style.cssText = p === currentPage ? activeBtnStyle : btnStyle;
+    b.onclick = (function(pg) { return function() { pkgGoToPage(pg); }; })(p);
+    container.appendChild(b);
+  }
+
+  if (endPage < totalPages) {
+    if (endPage < totalPages - 1) {
+      var dots = document.createElement('span');
+      dots.textContent = '…'; dots.style.cssText = 'color:var(--muted);font-size:11px;padding:0 2px';
+      container.appendChild(dots);
+    }
+    var b = document.createElement('button'); b.textContent = totalPages;
+    b.style.cssText = btnStyle; b.onclick = function() { jobsGoToPage(totalPages); };
+    container.appendChild(b);
+  }
+
+  var next = document.createElement('button');
+  next.textContent = '›'; next.style.cssText = btnStyle;
+  next.disabled = currentPage >= totalPages;
+  next.onclick = function() { pkgGoToPage(currentPage + 1); };
+  container.appendChild(next);
+}
+
 function filterOutdated(e) {
   e.stopPropagation();
   showingOutdatedOnly = !showingOutdatedOnly;
@@ -959,6 +1131,7 @@ function filterOutdated(e) {
 }
 
 function setSort(column) {
+  pkgCurrentPage = 1;
   if (sortState.column !== column) {
     sortState.column = column; sortState.direction = 'asc';
   } else if (sortState.direction === 'asc') {
@@ -1352,7 +1525,7 @@ function updateDashboard() {
   document.getElementById('statPackages').textContent  = data.length;
   document.getElementById('statOutdated').textContent  = totalOutdated;
   document.getElementById('outdatedBadge').textContent = totalOutdated + ' outdated';
-  document.getElementById('rowsBadge').textContent     = Math.min(data.length, 500) + ' rows';
+  document.getElementById('rowsBadge').textContent     = data.length + ' rows';
   document.getElementById('chartBadge').textContent    = data.length + ' packages';
 }
 
@@ -1370,13 +1543,30 @@ function renderChart(data) {
   });
 }
 
-function renderTable(data) {
-  rowSourceMap = {};
-  var tbody = document.getElementById('tableBody');
-  tbody.innerHTML = '';
-  if (!data.length) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No data</div></td></tr>'; return; }
+var _currentTableData = [];
 
-  data.slice(0, 500).forEach(function(r) {
+function renderTable(data) {
+  _currentTableData = data;
+  pkgCurrentPage = 1;
+  renderTablePage();
+}
+
+function renderTablePage() {
+  rowSourceMap = {};
+  var tbody    = document.getElementById('tableBody');
+  var data     = _currentTableData;
+  var pageSize = parseInt(document.getElementById('pkgPageSize') ? document.getElementById('pkgPageSize').value : 100);
+  var total    = data.length;
+
+  renderPkgPagination(total, pageSize, pkgCurrentPage);
+
+  tbody.innerHTML = '';
+  if (!total) { tbody.innerHTML = '<tr><td colspan="9"><div class="empty">No data</div></td></tr>'; return; }
+
+  var start    = (pkgCurrentPage - 1) * pageSize;
+  var pageData = data.slice(start, start + pageSize);
+
+  pageData.forEach(function(r) {
     var status = getStatus(r);
     var tr = document.createElement('tr');
     if (status.outdated) tr.classList.add('outdated');
@@ -1424,7 +1614,7 @@ function renderTable(data) {
 }
 
 function filterBySoftware(name) {
-  selectedSoftware.clear(); selectedSoftware.add(name); renderSoftwareList(); updateDashboard();
+  pkgCurrentPage = 1; selectedSoftware.clear(); selectedSoftware.add(name); renderSoftwareList(); updateDashboard();
 }
 
 async function requestUpgradeByKey(computer, chocoId, displayName, btn) {
@@ -1486,13 +1676,31 @@ var jobOutputMap = {};
 var rowSourceMap = {};
 
 function renderJobHistory() {
-  var body = document.getElementById('jobHistoryBody');
-  if (!allJobs.length) { body.innerHTML = '<div class="empty">No jobs yet.</div>'; return; }
+  var body     = document.getElementById('jobHistoryContent');
+  var pageSize = parseInt(document.getElementById('jobPageSize') ? document.getElementById('jobPageSize').value : 50);
+  var total    = allJobs.length;
+
+  if (!total) {
+    body.innerHTML = '<div class="empty">No jobs yet.</div>';
+    renderJobPagination(0, pageSize, 1);
+    return;
+  }
+
+  // Clamp current page
+  var totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (jobsCurrentPage > totalPages) jobsCurrentPage = totalPages;
+
+  var start    = (jobsCurrentPage - 1) * pageSize;
+  var pageJobs = allJobs.slice(start, start + pageSize);
+
+  renderJobPagination(total, pageSize, jobsCurrentPage);
+
+  if (!pageJobs.length) { body.innerHTML = '<div class="empty">No jobs on this page.</div>'; return; }
   jobOutputMap = {};
   var table = document.createElement('table');
   table.innerHTML = '<thead><tr><th>Computer</th><th>Package</th><th>Action</th><th>Status</th><th>Created</th><th>Updated</th><th>Output</th></tr></thead>';
   var tbody = document.createElement('tbody');
-  allJobs.forEach(function(job) {
+  pageJobs.forEach(function(job) {
     var tr = document.createElement('tr');
     var created    = job.created_at ? new Date(job.created_at).toLocaleString() : '\u2014';
     var updated    = job.updated_at ? new Date(job.updated_at).toLocaleString() : '\u2014';
@@ -1527,6 +1735,16 @@ function renderJobHistory() {
         return function() { cancelJob(id); };
       })(job.id));
       outputCell.appendChild(cancelBtn);
+    }
+    // Delete button for completed jobs
+    if (['done','failed','cancelled'].indexOf(job.status) !== -1) {
+      var delBtn = document.createElement('button');
+      delBtn.className = 'job-cancel-btn';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', (function(id) {
+        return function() { deleteJob(id); };
+      })(job.id));
+      outputCell.appendChild(delBtn);
     }
     tbody.appendChild(tr);
   });
@@ -1848,6 +2066,20 @@ function filterToComputer(hostname) {
   updateDashboard();
 }
 
+
+async function deleteCompletedJobs() {
+  if (!confirm('Delete all done, failed and cancelled jobs?')) return;
+  var res = await fetch('/api/jobs/completed', {method: 'DELETE'});
+  if (res.ok) loadJobs();
+  else { var d = await res.json(); alert(d.error || 'Error'); }
+}
+
+async function deleteJob(jobId) {
+  if (!confirm('Delete this job?')) return;
+  var res = await fetch('/api/jobs/' + jobId, {method: 'DELETE'});
+  if (res.ok) loadJobs();
+  else { var d = await res.json(); alert(d.error || 'Error'); }
+}
 
 async function cancelJob(jobId) {
   if (!confirm('Cancel this job?')) return;
