@@ -4,6 +4,7 @@ from routes.jobs       import jobs_bp
 from routes.computers  import computers_bp
 from routes.packages   import packages_bp
 from routes.config     import config_bp
+from routes.notifications import notify_bp
 from datetime import timedelta
 from auth import auth_bp, init_auth
 from dotenv import load_dotenv
@@ -25,6 +26,7 @@ app.register_blueprint(jobs_bp)
 app.register_blueprint(computers_bp)
 app.register_blueprint(packages_bp)
 app.register_blueprint(config_bp)
+app.register_blueprint(notify_bp)
 app.config['SESSION_COOKIE_SECURE'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
