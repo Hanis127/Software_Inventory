@@ -54,6 +54,17 @@ def create_bulk_jobs():
     return jsonify({'ok': True, 'queued': len(job_ids),
                     'job_ids': job_ids, 'skipped': skipped})
 
+@jobs_bp.route('/api/jobs/<job_id>/cancel', methods=['POST'])
+@login_required
+def cancel_job(job_id):
+    row = query("SELECT id, status FROM jobs WHERE id = %s", (job_id,), fetch='one')
+    if not row:
+        return jsonify({'error': 'Job not found'}), 404
+    if row['status'] != 'pending':
+        return jsonify({'error': f'Cannot cancel a job with status: {row["status"]}'}), 400
+    query("UPDATE jobs SET status = 'cancelled', updated_at = NOW() WHERE id = %s", (job_id,))
+    return jsonify({'ok': True})
+
 @jobs_bp.route('/api/jobs/<job_id>', methods=['GET'])
 @login_required
 def get_job(job_id):
