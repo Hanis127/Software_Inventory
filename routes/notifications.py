@@ -163,7 +163,13 @@ def get_pending_notifications(hostname):
     for job in notify_jobs:
         due.append(_serialize_job(job, 'notify'))
 
-    reminder_minutes = [60, 30, 15, 5]
+    # label, fires when minutes_left is within this window
+    reminder_milestones = [
+        ('t-60', 60, 62),
+        ('t-15', 15, 17),
+        ('t-5',   5,  7),
+    ]
+
     for job in restart_jobs:
         restart_at = job['restart_at']
         if not restart_at:
@@ -178,28 +184,37 @@ def get_pending_notifications(hostname):
 
         minutes_left = (restart_dt - now).total_seconds() / 60
 
-        # Time to restart
+        # Time to restart — tell agent to execute it
         if minutes_left <= 0:
             due.append(_serialize_job(job, 'do_restart'))
             continue
 
-        # Initial notification (scheduled_for has passed)
+        # Initial notification when scheduled_for has passed
         scheduled_for = job['scheduled_for']
+        fired_label   = None
         if scheduled_for:
             sf_dt = scheduled_for if hasattr(scheduled_for, 'tzinfo') else \
                 datetime.fromisoformat(str(scheduled_for)).replace(tzinfo=timezone.utc)
             if now >= sf_dt and 'initial' not in reminders_sent:
-                due.append(_serialize_job(job, 'remind', label='initial',
-                                         minutes_left=int(minutes_left)))
-                continue
+                fired_label = 'initial'
 
-        # Fixed reminders: 60, 30, 15, 5 minutes before restart
-        for mins in reminder_minutes:
-            key = f"t-{mins}"
-            if key not in reminders_sent and minutes_left <= mins + 2:
-                due.append(_serialize_job(job, 'remind', label=key,
-                                         minutes_left=int(minutes_left)))
-                break
+        # Fixed reminders at T-60, T-15, T-5 (only if initial already sent)
+        if not fired_label and 'initial' in reminders_sent:
+            for label, trigger_mins, window_top in reminder_milestones:
+                if label not in reminders_sent and trigger_mins <= minutes_left <= window_top:
+                    fired_label = label
+                    break
+
+        if fired_label:
+            # Mark as sent in DB immediately before returning to agent
+            # so that rapid re-polls don't fire the same reminder twice
+            reminders_sent.append(fired_label)
+            query("""
+                UPDATE jobs SET reminders_sent = %s::jsonb, updated_at = NOW()
+                WHERE id = %s
+            """, (json.dumps(reminders_sent), job['id']))
+            due.append(_serialize_job(job, 'remind', label=fired_label,
+                                     minutes_left=int(minutes_left)))
 
     return jsonify(due)
 
@@ -258,13 +273,15 @@ def acknowledge_notification(job_id):
             # Simple notification confirmed — mark done
             query("UPDATE jobs SET status = 'done', updated_at = NOW() WHERE id = %s", (job_id,))
         else:
-            # Restart confirmed early — mark reminder as sent, don't restart yet
+            # Restart confirmed — mark this reminder as sent so it doesn't re-fire
             if reminder_label and reminder_label not in reminders_sent:
                 reminders_sent.append(reminder_label)
+            # Always persist reminders_sent even if unchanged, to confirm DB write
             query("""
                 UPDATE jobs SET reminders_sent = %s::jsonb, updated_at = NOW()
                 WHERE id = %s
             """, (json.dumps(reminders_sent), job_id))
+            print(f"[ack] job {job_id} confirmed, label={reminder_label}, reminders_sent now={reminders_sent}")
 
     elif result == 'delay' and delay_minutes > 0:
         delay_count = (job['delay_count'] or 0) + 1
@@ -274,30 +291,33 @@ def acknowledge_notification(job_id):
             return jsonify({'error': 'Max delays reached'}), 400
 
         # Shift restart_at and reschedule initial notification
+        from datetime import timedelta
         if job['action'] == 'scheduled_restart' and job['restart_at']:
             restart_dt = job['restart_at']
             if not hasattr(restart_dt, 'tzinfo'):
                 restart_dt = datetime.fromisoformat(str(restart_dt)).replace(tzinfo=timezone.utc)
-            new_restart = restart_dt + __import__('datetime').timedelta(minutes=delay_minutes)
-            # Reset reminders so they fire again relative to new time
+            new_restart    = restart_dt + timedelta(minutes=delay_minutes)
+            # Schedule first notification 2 minutes from now so agent doesn't
+            # immediately re-fire the popup before the user has time to react
+            new_scheduled  = datetime.now(timezone.utc) + timedelta(minutes=2)
             query("""
                 UPDATE jobs
                 SET restart_at      = %s,
-                    scheduled_for   = NOW(),
+                    scheduled_for   = %s,
                     delay_count     = %s,
                     reminders_sent  = '[]'::jsonb,
                     updated_at      = NOW()
                 WHERE id = %s
-            """, (new_restart.isoformat(), delay_count, job_id))
+            """, (new_restart.isoformat(), new_scheduled.isoformat(), delay_count, job_id))
         else:
-            # Notify-only: reschedule
+            # Notify-only: reschedule after delay_minutes
             query("""
                 UPDATE jobs
-                SET scheduled_for = NOW() + INTERVAL '%s minutes',
+                SET scheduled_for = NOW() + (%s || ' minutes')::interval,
                     delay_count   = %s,
                     updated_at    = NOW()
                 WHERE id = %s
-            """, (delay_minutes, delay_count, job_id))
+            """, (str(delay_minutes), delay_count, job_id))
 
     elif result == 'do_restart':
         # Agent has executed the restart
