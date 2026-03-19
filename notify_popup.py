@@ -59,7 +59,7 @@ def run_popup(payload):
     root.protocol('WM_DELETE_WINDOW', lambda: None)  # disable X button
 
     # Centre on screen
-    w, h = 560, 440
+    w, h = 660, 440
     root.update_idletasks()
     sw = root.winfo_screenwidth()
     sh = root.winfo_screenheight()
@@ -148,33 +148,41 @@ def run_popup(payload):
         make_btn(btn_frame, 'Restart Now',
                  lambda: finish('do_restart'), primary=True).pack(side='left', padx=4)
     else:
-        confirm_text = 'Acknowledged' if not is_restart else 'Understood'
+        if is_restart:
+            confirm_text = "Understood"
+        else:
+            confirm_text = 'Acknowledged'
         make_btn(btn_frame, confirm_text,
                  lambda: finish('confirmed'), primary=True).pack(side='left', padx=4)
 
     if not is_final and delays_remaining > 0 and delay_options:
-        tk.Label(btn_frame, text='Remind me in:',
+        delay_label_text = 'Postpone restart by:' if is_restart else 'Remind me in:'
+        tk.Label(btn_frame, text=delay_label_text,
                  font=('Segoe UI', 9),
                  bg=colors['bg'], fg='#888888').pack(side='left', padx=(16, 4))
 
         def fmt(mins):
-            if mins < 60:   return f'{mins}m'
-            if mins < 1440: return f'{mins // 60}h'
-            return f'{mins // 1440}d'
+            if mins < 60:   return f'+{mins}m'
+            if mins < 1440: return f'+{mins // 60}h'
+            return f'+{mins // 1440}d'
+
+        delay_fmt = fmt if is_restart else (lambda m: (f'{m}m' if m < 60 else (f'{m//60}h' if m < 1440 else f'{m//1440}d')))
 
         for mins in delay_options:
-            make_btn(btn_frame, fmt(mins),
+            make_btn(btn_frame, delay_fmt(mins),
                      lambda m=mins: finish('delay', m)).pack(side='left', padx=2)
 
     # ── Footer ────────────────────────────────────────────────────────────────
     if delays_remaining <= 0 and not is_final:
-        tk.Label(root, text='No more delays available.',
+        msg = 'Restart cannot be postponed further — please save your work.' if is_restart else 'No more delays available.'
+        tk.Label(root, text=msg,
                  font=('Segoe UI', 9, 'italic'),
-                 bg=colors['bg'], fg='#888888').pack(pady=(0, 10))
+                 bg=colors['bg'], fg=colors['border']).pack(pady=(0, 10))
     elif is_restart and restart_at:
-        tk.Label(root, text=f'Scheduled restart: {restart_at}',
+        delays_info = f'  ({delays_remaining} postpone(s) remaining)' if delays_remaining > 0 and not is_final else ''
+        tk.Label(root, text=f'Scheduled restart: {restart_at}{delays_info}',
                  font=('Consolas', 9),
-                 bg=colors['bg'], fg='#555555').pack(pady=(0, 10))
+                 bg=colors['bg'], fg='#666666').pack(pady=(0, 10))
 
     play_alert(urgency)
     root.mainloop()
