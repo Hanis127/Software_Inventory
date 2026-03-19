@@ -783,8 +783,8 @@ def handle_notification(job):
     if result == "do_restart":
         log("Executing scheduled restart...")
         subprocess.run(
-            ["shutdown", "/r", "/t", "30", "/c",
-             "Scheduled system restart by IT. Restarting in 30 seconds."],
+            ["shutdown", "/r", "/t", "60", "/c",
+             "Scheduled system restart, save your work. Restarting in 1 minute."],
             capture_output=True
         )
 
