@@ -90,18 +90,33 @@ def create_notification():
 @notify_bp.route('/api/notify/active', methods=['GET'])
 @login_required
 def list_active_notifications():
-    """Return pending/running notify and scheduled_restart jobs."""
-    rows = query("""
-        SELECT j.id, j.action, j.notify_title, j.notify_message, j.urgency,
-               j.scheduled_for, j.restart_at, j.delay_options, j.delay_count,
-               j.max_delays, j.reminders_sent, j.status, j.created_at,
-               c.hostname
-        FROM jobs j
-        JOIN computers c ON c.id = j.computer_id
-        WHERE j.action IN ('notify', 'scheduled_restart')
-          AND j.status IN ('pending', 'running')
-        ORDER BY j.restart_at ASC NULLS LAST, j.scheduled_for ASC
-    """, fetch='all')
+    """Return pending/running notify and scheduled_restart jobs, optionally filtered by hostname."""
+    hostname = request.args.get('hostname', '').strip().upper()
+    if hostname:
+        rows = query("""
+            SELECT j.id, j.action, j.notify_title, j.notify_message, j.urgency,
+                   j.scheduled_for, j.restart_at, j.delay_options, j.delay_count,
+                   j.max_delays, j.reminders_sent, j.status, j.created_at,
+                   c.hostname
+            FROM jobs j
+            JOIN computers c ON c.id = j.computer_id
+            WHERE j.action IN ('notify', 'scheduled_restart')
+              AND j.status IN ('pending', 'running')
+              AND c.hostname = %s
+            ORDER BY j.restart_at ASC NULLS LAST, j.scheduled_for ASC
+        """, (hostname,), fetch='all')
+    else:
+        rows = query("""
+            SELECT j.id, j.action, j.notify_title, j.notify_message, j.urgency,
+                   j.scheduled_for, j.restart_at, j.delay_options, j.delay_count,
+                   j.max_delays, j.reminders_sent, j.status, j.created_at,
+                   c.hostname
+            FROM jobs j
+            JOIN computers c ON c.id = j.computer_id
+            WHERE j.action IN ('notify', 'scheduled_restart')
+              AND j.status IN ('pending', 'running')
+            ORDER BY j.restart_at ASC NULLS LAST, j.scheduled_for ASC
+        """, fetch='all')
     return jsonify([dict(r) for r in rows])
 
 

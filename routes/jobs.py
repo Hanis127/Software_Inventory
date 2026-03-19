@@ -94,25 +94,30 @@ def get_job(job_id):
 @jobs_bp.route('/api/jobs', methods=['GET'])
 @login_required
 def list_jobs():
-    limit  = min(int(request.args.get('limit', 100)), 1000)
-    status = request.args.get('status', '').strip()
+    limit    = min(int(request.args.get('limit', 100)), 2000)
+    status   = request.args.get('status',   '').strip()
+    hostname = request.args.get('hostname', '').strip().upper()
+
+    where  = []
+    params = []
     if status:
-        rows = query("""
-            SELECT j.*, c.hostname
-            FROM jobs j
-            JOIN computers c ON c.id = j.computer_id
-            WHERE j.status = %s
-            ORDER BY j.created_at DESC
-            LIMIT %s
-        """, (status, limit), fetch='all')
-    else:
-        rows = query("""
-            SELECT j.*, c.hostname
-            FROM jobs j
-            JOIN computers c ON c.id = j.computer_id
-            ORDER BY j.created_at DESC
-            LIMIT %s
-        """, (limit,), fetch='all')
+        where.append("j.status = %s")
+        params.append(status)
+    if hostname:
+        where.append("c.hostname = %s")
+        params.append(hostname)
+
+    where_sql = ('WHERE ' + ' AND '.join(where)) if where else ''
+    params.append(limit)
+
+    rows = query(f"""
+        SELECT j.*, c.hostname
+        FROM jobs j
+        JOIN computers c ON c.id = j.computer_id
+        {where_sql}
+        ORDER BY j.created_at DESC
+        LIMIT %s
+    """, params, fetch='all')
     return jsonify([dict(r) for r in rows])
 
 # ── Agent-only routes (require valid agent token) ─────────────────────────────
