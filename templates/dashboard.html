@@ -224,6 +224,43 @@
   .cancel-notify-btn { padding:2px 8px; font-size:10px; font-family:var(--mono); background:transparent; border:1px solid var(--danger); color:var(--danger); border-radius:3px; cursor:pointer; transition:all 0.15s; }
   .cancel-notify-btn:hover { background:var(--danger); color:var(--bg); }
 
+
+  /* machine detail panel */
+  .machine-detail-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200; }
+  .machine-detail-overlay.open { display:block; }
+  .machine-detail-panel { position:fixed; top:0; right:-1380px; width:1360px; height:100vh; background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; z-index:201; transition:right 0.25s ease; overflow:hidden; }
+  .machine-detail-panel.open { right:0; }
+  .machine-detail-header { display:flex; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border); background:var(--bg); flex-shrink:0; }
+  .machine-detail-title { font-family:var(--mono); font-size:15px; font-weight:600; color:var(--accent); flex:1; }
+  .machine-detail-close { background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; padding:0 4px; line-height:1; }
+  .machine-detail-close:hover { color:var(--text); }
+  .machine-detail-body { flex:1; overflow-y:auto; padding:16px 20px; }
+  .machine-meta-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px; }
+  .machine-meta-item { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:8px 12px; }
+  .machine-meta-label { font-size:9px; font-family:var(--mono); color:var(--muted); text-transform:uppercase; letter-spacing:0.1em; margin-bottom:3px; }
+  .machine-meta-value { font-size:12px; font-family:var(--mono); color:var(--text); }
+  .machine-actions { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .machine-action-btn { padding:6px 14px; font-size:11px; font-family:var(--mono); border-radius:4px; cursor:pointer; transition:all 0.15s; background:transparent; }
+  .machine-action-btn.primary { border:1px solid var(--accent); color:var(--accent); }
+  .machine-action-btn.primary:hover { background:var(--accent); color:var(--bg); }
+  .machine-action-btn.warn { border:1px solid var(--warn); color:var(--warn); }
+  .machine-action-btn.warn:hover { background:var(--warn); color:var(--bg); }
+  .machine-action-btn.muted { border:1px solid var(--border); color:var(--muted); }
+  .machine-action-btn.muted:hover { border-color:var(--muted); color:var(--text); }
+  .machine-panel { margin-bottom:12px; background:var(--bg); border:1px solid var(--border); border-radius:5px; overflow:hidden; }
+  .machine-panel-header { display:flex; align-items:center; justify-content:space-between; padding:9px 14px; cursor:pointer; user-select:none; transition:background 0.1s; }
+  .machine-panel-header:hover { background:var(--border); }
+  .machine-panel-title { font-family:var(--mono); font-size:11px; font-weight:600; color:var(--text); letter-spacing:0.06em; text-transform:uppercase; display:flex; align-items:center; gap:8px; }
+  .machine-panel-body { display:none; padding:12px 14px; border-top:1px solid var(--border); }
+  .machine-panel-body.open { display:block; }
+  .machine-table { width:100%; border-collapse:collapse; font-size:11px; }
+  .machine-table th { text-align:left; padding:5px 8px; font-family:var(--mono); font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .machine-table td { padding:5px 8px; border-bottom:1px solid var(--border); color:var(--text); }
+  .machine-table tr:last-child td { border-bottom:none; }
+  .machine-table tr:hover td { background:rgba(255,255,255,0.02); }
+  .machine-search { width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text); padding:5px 10px; border-radius:4px; font-size:11px; font-family:var(--mono); outline:none; margin-bottom:8px; transition:border-color 0.15s; box-sizing:border-box; }
+  .machine-search:focus { border-color:var(--accent); }
+
   ::-webkit-scrollbar { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -1419,7 +1456,12 @@ function renderComputerList() {
         '<span class="item-name">' + c.hostname + '</span>' +
         '<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + formatLastSeen(c.last_seen) + '</span>' +
       '</div>';
-    div.onclick = function() { toggleComputer(c.hostname, div); };
+    div.onclick = function(e) {
+      // Left side of item toggles filter, name text opens detail
+      toggleComputer(c.hostname, div);
+    };
+    // Double-click opens machine detail
+    div.ondblclick = function(e) { e.stopPropagation(); openMachineDetail(c.hostname); };
     list.appendChild(div);
   });
   updateSidebarMeta();
@@ -1600,7 +1642,7 @@ function renderTablePage() {
 
     var envLatest = envLatestMap.get(r.display_name) || '';
     tr.innerHTML =
-      '<td><span class="computer-pill">' + (r.computer || '') + '</span></td>' +
+      '<td><span class="computer-pill" style="cursor:pointer" onclick="openMachineDetail(' + JSON.stringify(r.computer || '') + ')">' + (r.computer || '') + '</span></td>' +
       '<td class="td-name" onclick="filterBySoftware(\'' + (r.display_name||'').replace(/'/g,"\\'") + '\')">' + (r.display_name || '') + '</td>' +
       '<td style="font-family:var(--mono);font-size:11px">' + (r.display_version || '') + '</td>' +
       '<td style="font-family:var(--mono);font-size:11px;color:var(--accent2)">' + (envLatest || '&#8212;') + '</td>' +
@@ -1706,7 +1748,7 @@ function renderJobHistory() {
     var updated    = job.updated_at ? new Date(job.updated_at).toLocaleString() : '\u2014';
     var actionColor = job.action === 'uninstall' ? 'var(--danger)' : job.action === 'install' ? '#a855f7' : 'var(--accent)';
     tr.innerHTML =
-      '<td><span class="computer-pill">' + (job.hostname || '\u2014') + '</span></td>' +
+      '<td><span class="computer-pill" style="cursor:pointer" onclick="openMachineDetail(' + JSON.stringify(job.hostname || '') + ')">' + (job.hostname || '\u2014') + '</span></td>' +
       '<td style="font-family:var(--mono);font-size:11px">' + (job.display_name || job.package_id) + '</td>' +
       '<td><span style="color:' + actionColor + ';font-family:var(--mono);font-size:10px">' + (job.action || 'upgrade') + '</span></td>' +
       '<td><span class="job-row-status job-' + job.status + '">' + job.status + '</span></td>' +
@@ -2317,6 +2359,279 @@ async function cancelNotification(jobId) {
   else { var d = await res.json(); alert(d.error || 'Error'); }
 }
 
+
+// ── Machine Detail Panel ──────────────────────────────────────────────────────
+var _currentMachine     = null;
+var _machineSoftwareAll = [];
+
+function openMachineDetail(hostname) {
+  if (!hostname) return;
+  _currentMachine = hostname;
+  document.getElementById('machineDetailPanel').classList.add('open');
+  document.getElementById('machineOverlay').classList.add('open');
+  document.getElementById('machineDetailTitle').textContent = hostname;
+  document.getElementById('machineDetailSubtitle').textContent = 'Loading...';
+  loadMachineDetail(hostname);
+}
+
+function closeMachineDetail() {
+  document.getElementById('machineDetailPanel').classList.remove('open');
+  document.getElementById('machineOverlay').classList.remove('open');
+  _currentMachine = null;
+}
+
+function toggleMachinePanel(header) {
+  var body   = header.nextElementSibling;
+  var toggle = header.querySelector('.panel-toggle');
+  body.classList.toggle('open');
+  toggle.classList.toggle('open');
+}
+
+async function loadMachineDetail(hostname) {
+  if (!hostname) return;
+  var computer = allComputers.find(function(c) { return c.hostname === hostname; });
+  if (computer) renderMachineMeta(computer);
+
+  _machineSoftwareAll = allInventory.filter(function(r) { return r.computer === hostname; });
+  renderMachineSoftware();
+
+  try {
+    var r    = await fetch('/api/jobs?limit=200&hostname=' + encodeURIComponent(hostname));
+    var jobs = await r.json();
+    renderMachineJobs(jobs);
+  } catch(e) { console.error('machine jobs', e); }
+
+  try {
+    var r2     = await fetch('/api/notify/active?hostname=' + encodeURIComponent(hostname));
+    var notifs = await r2.json();
+    renderMachineNotifications(notifs);
+  } catch(e) { console.error('machine notifs', e); }
+
+  if (computer) {
+    document.getElementById('machineDetailSubtitle').textContent =
+      (computer.ip_address || '') +
+      (computer.os_version ? '  ·  ' + computer.os_version : '') +
+      '  ·  ' + (computer.status === 'online' ? 'Online' : 'Offline') +
+      '  ·  Last seen: ' + formatLastSeen(computer.last_seen);
+  }
+}
+
+function renderMachineMeta(computer) {
+  var grid  = document.getElementById('machineMetaGrid');
+  var items = [
+    ['Hostname',   computer.hostname   || '—'],
+    ['IP Address', computer.ip_address || '—'],
+    ['OS',         computer.os_version || '—'],
+    ['Status',     computer.status === 'online'
+                     ? '<span style="color:var(--online)">Online</span>'
+                     : '<span style="color:var(--offline)">Offline</span>'],
+    ['Last Seen',  formatLastSeen(computer.last_seen)],
+    ['Enrolled',   computer.enrolled_at ? new Date(computer.enrolled_at).toLocaleDateString() : '—'],
+  ];
+  grid.innerHTML = items.map(function(item) {
+    return '<div class="machine-meta-item"><div class="machine-meta-label">' + item[0] +
+           '</div><div class="machine-meta-value">' + item[1] + '</div></div>';
+  }).join('');
+}
+
+function renderMachineSoftware() {
+  var search   = (document.getElementById('machineSoftwareSearch').value || '').toLowerCase();
+  var tbody    = document.getElementById('machineSoftwareBody');
+  var filtered = _machineSoftwareAll.filter(function(r) {
+    return !search ||
+      (r.display_name || '').toLowerCase().includes(search) ||
+      (r.publisher    || '').toLowerCase().includes(search);
+  });
+  var outdated = filtered.filter(function(r) { return isOutdated(r); }).length;
+  var outdatedEl = document.getElementById('machineSoftwareOutdated');
+  document.getElementById('machineSoftwareCount').textContent = filtered.length + ' packages';
+  outdatedEl.textContent    = outdated ? outdated + ' outdated' : '';
+  outdatedEl.style.display  = outdated ? '' : 'none';
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="6"><div class="empty">No software found.</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  filtered.forEach(function(r) {
+    var status    = getStatus(r);
+    var envLatest = envLatestMap.get(r.display_name) || '';
+    var latest    = r.choco_latest || envLatest || '—';
+    var statusHtml = status.outdated
+      ? '<span class="status-pill pill-outdated" style="font-size:9px">Outdated</span>'
+      : status.label === 'Unknown'
+        ? '<span class="status-pill pill-unknown" style="font-size:9px">Unknown</span>'
+        : '<span class="status-pill pill-uptodate" style="font-size:9px">OK</span>';
+    var actionHtml = '';
+    if (r.choco_id) {
+      var safeId   = r.choco_id.replace(/'/g, "\'");
+      var safeName = (r.display_name || '').replace(/'/g, "\'");
+      var safeComp = (r.computer    || '').replace(/'/g, "\'");
+      var internalPkg = allInternalPackages.find(function(p) { return p.choco_id === r.choco_id; });
+      var src = internalPkg ? (serverConfig.internal_source_url || '') : '';
+      if (status.outdated) {
+        actionHtml += '<button class="update-btn" style="margin-right:3px;font-size:9px;padding:2px 7px" ' +
+          'onclick="requestUpgrade(\'' + safeComp + '\',\'' + safeId + '\',\'' + safeName + '\',\'' + src + '\',this)">Update</button>';
+      }
+      actionHtml += '<button class="uninstall-btn" style="font-size:9px;padding:2px 7px" ' +
+        'onclick="requestUninstall(\'' + safeComp + '\',\'' + safeId + '\',\'' + safeName + '\',this)">Uninstall</button>';
+    }
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td style="color:var(--accent2);font-weight:500">' + (r.display_name || '') + '</td>' +
+      '<td style="font-family:var(--mono)">' + (r.display_version || '—') + '</td>' +
+      '<td style="font-family:var(--mono);color:var(--accent)">' + latest + '</td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td style="color:var(--muted)">' + (r.publisher || '—') + '</td>' +
+      '<td>' + actionHtml + '</td>';
+    tbody.appendChild(tr);
+  });
+}
+
+function renderMachineJobs(jobs) {
+  var active  = jobs.filter(function(j) { return j.status === 'pending' || j.status === 'running'; });
+  var history = jobs.filter(function(j) { return j.status !== 'pending' && j.status !== 'running'; });
+  document.getElementById('machineActiveJobsCount').textContent = active.length  ? active.length  + ' active' : '';
+  document.getElementById('machineJobHistoryCount').textContent = history.length ? history.length + ' jobs'   : '';
+
+  var activeBody = document.getElementById('machineActiveJobsBody');
+  activeBody.innerHTML = active.length  ? buildMachineJobTable(active, true)   : '<div class="empty">No active jobs.</div>';
+  var histBody   = document.getElementById('machineJobHistoryBody');
+  histBody.innerHTML   = history.length ? buildMachineJobTable(history, false) : '<div class="empty">No job history.</div>';
+}
+
+function buildMachineJobTable(jobs, showCancel) {
+  var rows = jobs.map(function(job) {
+    var actionColor = job.action === 'uninstall' ? 'var(--danger)' : job.action === 'install' ? '#a855f7' : 'var(--accent)';
+    var created     = job.created_at ? new Date(job.created_at).toLocaleString() : '—';
+    var btn = '';
+    if (showCancel && job.status === 'pending') {
+      btn = '<button class="job-cancel-btn" onclick="cancelJob(\'' + job.id + '\');setTimeout(function(){loadMachineDetail(_currentMachine)},500)">Cancel</button>';
+    } else if (!showCancel) {
+      btn = '<button class="job-cancel-btn" onclick="deleteJob(\'' + job.id + '\');setTimeout(function(){loadMachineDetail(_currentMachine)},500)">Delete</button>';
+    }
+    return '<tr>' +
+      '<td style="font-family:var(--mono)">' + (job.display_name || job.package_id || '') + '</td>' +
+      '<td><span style="color:' + actionColor + ';font-family:var(--mono);font-size:10px">' + (job.action || '') + '</span></td>' +
+      '<td><span class="job-row-status job-' + job.status + '">' + job.status + '</span></td>' +
+      '<td style="font-family:var(--mono);font-size:10px;color:var(--muted)">' + created + '</td>' +
+      '<td>' + btn + '</td></tr>';
+  }).join('');
+  return '<table class="machine-table"><thead><tr>' +
+    '<th>Package</th><th>Action</th><th>Status</th><th>Created</th><th></th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function renderMachineNotifications(notifs) {
+  document.getElementById('machineNotifyCount').textContent = notifs.length ? notifs.length + ' active' : '';
+  var body = document.getElementById('machineNotifyBody');
+  if (!notifs.length) { body.innerHTML = '<div class="empty">No active notifications.</div>'; return; }
+  var rows = notifs.map(function(n) {
+    var restartAt = n.restart_at ? new Date(n.restart_at).toLocaleString() : '—';
+    var typeLabel = n.action === 'scheduled_restart'
+      ? '<span style="color:var(--warn);font-family:var(--mono);font-size:10px">RESTART</span>'
+      : '<span style="color:var(--accent2);font-family:var(--mono);font-size:10px">MESSAGE</span>';
+    return '<tr>' +
+      '<td>' + typeLabel + '</td>' +
+      '<td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (n.notify_title || '—') + '</td>' +
+      '<td class="urgency-' + (n.urgency||'warning') + '" style="font-family:var(--mono);font-size:10px">' + (n.urgency||'') + '</td>' +
+      '<td style="font-family:var(--mono);font-size:10px;color:var(--warn)">' + restartAt + '</td>' +
+      '<td><button class="cancel-notify-btn" onclick="cancelNotification(\'' + n.id + '\');setTimeout(function(){loadMachineDetail(_currentMachine)},500)">Cancel</button></td>' +
+      '</tr>';
+  }).join('');
+  body.innerHTML = '<table class="machine-table"><thead><tr>' +
+    '<th>Type</th><th>Title</th><th>Urgency</th><th>Restart At</th><th></th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table>';
+}
+
+function machineQuickMessage() {
+  if (!_currentMachine) return;
+  var m = _currentMachine;
+  closeMachineDetail();
+  var panel = document.getElementById('notifyPanelBody');
+  if (panel && !panel.classList.contains('open')) panel.previousElementSibling.click();
+  switchNotifyTab('message', document.querySelectorAll('.notify-tab')[0]);
+  notifySelectedComputers.clear();
+  notifySelectedComputers.add(m);
+  renderNotifyComputerList('notifyComputerList', notifySelectedComputers);
+  panel.scrollIntoView({behavior:'smooth'});
+}
+
+function machineQuickRestart() {
+  if (!_currentMachine) return;
+  var m = _currentMachine;
+  closeMachineDetail();
+  var panel = document.getElementById('notifyPanelBody');
+  if (panel && !panel.classList.contains('open')) panel.previousElementSibling.click();
+  switchNotifyTab('restart', document.querySelectorAll('.notify-tab')[1]);
+  restartSelectedComputers.clear();
+  restartSelectedComputers.add(m);
+  renderNotifyComputerList('restartComputerList', restartSelectedComputers);
+  panel.scrollIntoView({behavior:'smooth'});
+}
+
 </script>
+<div class="machine-detail-overlay" id="machineOverlay" onclick="closeMachineDetail()"></div>
+<div class="machine-detail-panel" id="machineDetailPanel">
+  <div class="machine-detail-header">
+    <div style="flex:1;min-width:0">
+      <div class="machine-detail-title" id="machineDetailTitle">Loading...</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px" id="machineDetailSubtitle"></div>
+    </div>
+    <button class="machine-detail-close" onclick="closeMachineDetail()">&#10005;</button>
+  </div>
+  <div class="machine-detail-body">
+    <div class="machine-meta-grid" id="machineMetaGrid"></div>
+    <div class="machine-actions">
+      <button class="machine-action-btn primary" onclick="machineQuickMessage()">&#128233; Send Message</button>
+      <button class="machine-action-btn warn"    onclick="machineQuickRestart()">&#128257; Schedule Restart</button>
+      <button class="machine-action-btn muted"   onclick="loadMachineDetail(_currentMachine)">&#8635; Refresh</button>
+    </div>
+    <div class="machine-panel">
+      <div class="machine-panel-header" onclick="toggleMachinePanel(this)">
+        <div class="machine-panel-title">Software
+          <span class="panel-badge badge-warn" id="machineSoftwareOutdated"></span>
+          <span class="panel-badge badge-info"  id="machineSoftwareCount"></span>
+        </div>
+        <span class="panel-toggle open">&#9658;</span>
+      </div>
+      <div class="machine-panel-body open">
+        <input class="machine-search" id="machineSoftwareSearch" placeholder="Search software..." oninput="renderMachineSoftware()">
+        <div style="overflow-x:auto"><table class="machine-table">
+          <thead><tr><th>Software</th><th>Installed</th><th>Latest</th><th>Status</th><th>Publisher</th><th>Action</th></tr></thead>
+          <tbody id="machineSoftwareBody"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="machine-panel">
+      <div class="machine-panel-header" onclick="toggleMachinePanel(this)">
+        <div class="machine-panel-title">Active Jobs
+          <span class="panel-badge badge-warn" id="machineActiveJobsCount"></span>
+        </div>
+        <span class="panel-toggle open">&#9658;</span>
+      </div>
+      <div class="machine-panel-body open" id="machineActiveJobsBody"><div class="empty">No active jobs.</div></div>
+    </div>
+    <div class="machine-panel">
+      <div class="machine-panel-header" onclick="toggleMachinePanel(this)">
+        <div class="machine-panel-title">Job History
+          <span class="panel-badge badge-info" id="machineJobHistoryCount"></span>
+        </div>
+        <span class="panel-toggle">&#9658;</span>
+      </div>
+      <div class="machine-panel-body" id="machineJobHistoryBody"><div class="empty">No jobs.</div></div>
+    </div>
+    <div class="machine-panel">
+      <div class="machine-panel-header" onclick="toggleMachinePanel(this)">
+        <div class="machine-panel-title">Notifications &amp; Restarts
+          <span class="panel-badge badge-warn" id="machineNotifyCount"></span>
+        </div>
+        <span class="panel-toggle">&#9658;</span>
+      </div>
+      <div class="machine-panel-body" id="machineNotifyBody"><div class="empty">No active notifications.</div></div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
