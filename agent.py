@@ -487,11 +487,19 @@ def validate_source_url(url):
     return bool(VALID_SOURCE.match(normalize_unc(url)))
 
 def run_upgrade(package_id, source_url=None):
-    log(f"Running: choco upgrade {package_id}" + (f" --source {source_url}" if source_url else ""))
+    # For upgrades, always include the community feed alongside any internal source.
+    # Passing --source exclusively would pin choco to that source only, causing
+    # "already latest version" when the internal share has an older build.
     try:
-        cmd = ["choco", "upgrade", package_id, "-y", "--no-progress"]
         if source_url:
-            cmd += ["--source", source_url]
+            # Combine internal source + community feed so choco picks the highest version
+            combined = f"{source_url};https://community.chocolatey.org/api/v2/"
+            log(f"Running: choco upgrade {package_id} --source <internal+community>")
+            cmd = ["choco", "upgrade", package_id, "-y", "--no-progress",
+                   "--source", combined]
+        else:
+            log(f"Running: choco upgrade {package_id}")
+            cmd = ["choco", "upgrade", package_id, "-y", "--no-progress"]
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
             encoding='utf-8', errors='replace',
@@ -783,8 +791,8 @@ def handle_notification(job):
     if result == "do_restart":
         log("Executing scheduled restart...")
         subprocess.run(
-            ["shutdown", "/r", "/t", "60", "/c",
-             "Scheduled system restart, save your work. Restarting in 1 minute."],
+            ["shutdown", "/r", "/t", "3600", "/c",
+             "Scheduled system restart, save your work. Restarting in 1 hour."],
             capture_output=True
         )
 
