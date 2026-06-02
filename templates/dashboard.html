@@ -2162,17 +2162,30 @@ async function loadAgents() {
     if (a.revoked) {
       btn.textContent = 'Unrevoke';
       btn.style.cssText = 'padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:3px;cursor:pointer;white-space:nowrap';
-      btn.onclick = function() { revokeAgent(a.hostname, false); };
+      btn.onclick = (function(h) { return function() { revokeAgent(h, false); }; })(a.hostname);
     } else {
       btn.textContent = 'Revoke';
       btn.style.cssText = 'padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--danger);color:var(--danger);border-radius:3px;cursor:pointer;white-space:nowrap';
-      btn.onclick = function() { revokeAgent(a.hostname, true); };
+      btn.onclick = (function(h) { return function() { revokeAgent(h, true); }; })(a.hostname);
     }
+
+    var delBtn = document.createElement('button');
+    delBtn.textContent = 'Delete';
+    delBtn.style.cssText = 'padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer;white-space:nowrap;margin-left:4px';
+    delBtn.onclick = (function(h) { return function() { deleteComputer(h); }; })(a.hostname);
 
     row.appendChild(info);
     row.appendChild(btn);
+    row.appendChild(delBtn);
     el.appendChild(row);
   });
+}
+
+async function deleteComputer(hostname) {
+  if (!confirm('Permanently delete ' + hostname + ' from the database?\nThis will remove all inventory, jobs and enrollment data for this machine.')) return;
+  var res = await fetch('/api/computers/' + encodeURIComponent(hostname), {method: 'DELETE'});
+  if (res.ok) { loadAgents(); loadAll(); }
+  else { var d = await res.json(); alert(d.error || 'Error deleting computer'); }
 }
 
 async function revokeAgent(hostname, revoke) {

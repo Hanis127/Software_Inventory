@@ -20,3 +20,15 @@ def get_computers():
         ORDER BY hostname
     """, (THRESHOLD,), fetch='all')
     return jsonify([dict(r) for r in rows])
+
+@computers_bp.route('/api/computers/<hostname>', methods=['DELETE'])
+def delete_computer(hostname):
+    row = query("SELECT id FROM computers WHERE hostname = %s", (hostname,), fetch='one')
+    if not row:
+        return jsonify({'error': 'Computer not found'}), 404
+    computer_id = row['id']
+    # Delete in order to respect FK constraints
+    query("DELETE FROM jobs    WHERE computer_id = %s", (computer_id,))
+    query("DELETE FROM software WHERE computer_id = %s", (computer_id,))
+    query("DELETE FROM computers WHERE id = %s", (computer_id,))
+    return jsonify({'ok': True})
