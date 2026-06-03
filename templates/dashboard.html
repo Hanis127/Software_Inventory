@@ -649,6 +649,7 @@
         <div class="notify-tabs">
           <button class="notify-tab active" onclick="switchNotifyTab('message', this)">Send Message</button>
           <button class="notify-tab" onclick="switchNotifyTab('restart', this)">Schedule Restart</button>
+          <button class="notify-tab" onclick="switchNotifyTab('command', this)">Run Command</button>
           <button class="notify-tab" onclick="switchNotifyTab('active', this)">Active</button>
         </div>
 
@@ -781,6 +782,41 @@
             <span id="rstStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
           </div>
         </div>
+
+        <div class="notify-section" id="notifyCommand">
+      <div class="notify-form-grid">
+        <div>
+          <div class="notify-field">
+            <label>Shell Type</label>
+            <select id="cmdType">
+              <option value="run_cmd">Command Prompt (cmd.exe)</option>
+              <option value="run_powershell">PowerShell</option>
+              <option value="run_msi_uninstall">enter full GUID to uninstall msi "{ED41CD4E-33BB-400C-AB20-B09388DC83EF}"</option>
+            </select>
+          </div>
+          <div class="notify-field">
+            <label>Script / Command</label>
+            <textarea id="cmdBody" placeholder="Enter your script or GUID here..." style="font-family:var(--mono); height: 180px;"></textarea>
+            <div style="font-size:10px;color:var(--muted);margin-top:3px">Execution is capped at a 300s timeout. Runs as the agent's user context.</div>
+          </div>
+        </div>
+        <div>
+          <div class="notify-field">
+            <label>Target Computers</label>
+            <div class="btn-row" style="margin-bottom:8px">
+              <button class="btn" onclick="commandSelectAll()">All</button>
+              <button class="btn" onclick="commandSelectOnline()">Online only</button>
+              <button class="btn" onclick="commandSelectNone()">Clear</button>
+            </div>
+            <div class="deploy-computer-list" id="commandComputerList" style="max-height:280px"></div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:8px;display:flex;align-items:center;gap:12px">
+        <button class="deploy-btn" style="background:var(--danger);color:var(--bg)" onclick="executeCommand()">&#9888; Execute Command</button>
+        <span id="cmdStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
+      </div>
+    </div>
 
         <!-- ── Active ── -->
         <div class="notify-section" id="notifyActive">
@@ -927,6 +963,7 @@ async function loadAll() {
   renderDeployComputerLists();
   renderNotifyComputerList('notifyComputerList', notifySelectedComputers);
   renderNotifyComputerList('restartComputerList', restartSelectedComputers);
+  renderNotifyComputerList('commandComputerList', commandSelectedComputers);
   document.getElementById('lastRefresh').textContent = 'Refreshed ' + new Date().toLocaleTimeString();
 }
 
@@ -2124,6 +2161,80 @@ function filterToComputer(hostname) {
   updateDashboard();
 }
 
+async function executeCommand() {
+  const cmdType = document.getElementById('cmdType').value;
+  const cmdBody = document.getElementById('cmdBody').value.trim();
+  const statusEl = document.getElementById('cmdStatus');
+
+  // 1. Validation
+  if (!cmdBody) {
+    statusEl.textContent = "❌ Error: Script, command, or GUID cannot be empty.";
+    statusEl.style.color = "var(--danger)";
+    return;
+  }
+
+  // 2. Data Formatting & Normalization
+  let payloadAction = cmdType;
+  let payloadArgs = cmdBody;
+
+  if (cmdType === 'run_msi_uninstall') {
+    payloadAction = 'msi_uninstall';
+    let bareGuid = cmdBody.replace(/[{}"']/g, '').trim().toUpperCase();
+    const guidPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
+
+    if (!guidPattern.test(bareGuid)) {
+      statusEl.textContent = "❌ Error: Invalid GUID format. Example: ED41CD4E-33BB-400C-AB20-B09388DC83EF";
+      statusEl.style.color = "var(--danger)";
+      return;
+    }
+    payloadArgs = `{${bareGuid}}`;
+  }
+
+  // 3. Extract Targets Natively from your State Set
+  const selectedComputers = Array.from(commandSelectedComputers);
+
+  if (selectedComputers.length === 0) {
+    statusEl.textContent = "❌ Error: Select at least one target computer.";
+    statusEl.style.color = "var(--danger)";
+    return;
+  }
+
+  statusEl.textContent = "⏳ Queueing jobs on server...";
+  statusEl.style.color = "var(--muted)";
+
+  // 4. Dispatch Request
+  try {
+    const response = await fetch('/api/jobs/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        package_id: payloadAction === 'msi_uninstall' ? 'msi_removal' : 'system_command',
+        display_name: payloadAction === 'msi_uninstall' ? `Uninstall msi (${payloadArgs})` : (payloadAction === 'run_cmd' ? 'CMD Script' : 'PowerShell Script'),
+        action: payloadAction,
+        install_args: payloadArgs,
+        computers: selectedComputers
+      })
+    });
+
+    const result = await response.json();
+
+    if (response.ok) {
+      statusEl.textContent = `🚀 Successfully queued ${result.queued} jobs!`;
+      statusEl.style.color = "var(--success)";
+      document.getElementById('cmdBody').value = '';
+
+      // Optional: Clear selection after deployment like a clean workflow
+      commandSelectedComputers.clear();
+      renderNotifyComputerList('commandComputerList', commandSelectedComputers);
+    } else {
+      statusEl.textContent = `❌ Server Error: ${result.error || 'Failed to execute'}`;
+      statusEl.style.color = "var(--danger)";
+    }
+  } catch (err) {
+    statusEl.textContent = `❌ Network Error: ${err.message}`;
+    statusEl.style.color = "var(--danger)";
+  }
+}
 
 async function deleteCompletedJobs() {
   if (!confirm('Delete all done, failed and cancelled jobs?')) return;
@@ -2215,12 +2326,13 @@ async function revokeAgent(hostname, revoke) {
 // ── Notifications & Restarts ──────────────────────────────────────────────────
 var notifySelectedComputers  = new Set();
 var restartSelectedComputers = new Set();
+var commandSelectedComputers = new Set();
 
 function switchNotifyTab(tab, btn) {
   document.querySelectorAll('.notify-tab').forEach(function(b) { b.classList.remove('active'); });
   document.querySelectorAll('.notify-section').forEach(function(s) { s.classList.remove('active'); });
   btn.classList.add('active');
-  var map = { message:'notifyMessage', restart:'notifyRestart', active:'notifyActive' };
+  var map = { message:'notifyMessage', restart:'notifyRestart', command: 'notifyCommand', active:'notifyActive' };
   document.getElementById(map[tab]).classList.add('active');
   if (tab === 'active') loadActiveNotifications();
 }
@@ -2253,6 +2365,11 @@ function notifySelectNone()   { notifySelectedComputers.clear(); renderNotifyCom
 function restartSelectAll()    { allComputers.forEach(function(c){restartSelectedComputers.add(c.hostname);}); renderNotifyComputerList('restartComputerList', restartSelectedComputers); }
 function restartSelectOnline() { restartSelectedComputers.clear(); allComputers.filter(function(c){return c.status==='online';}).forEach(function(c){restartSelectedComputers.add(c.hostname);}); renderNotifyComputerList('restartComputerList', restartSelectedComputers); }
 function restartSelectNone()   { restartSelectedComputers.clear(); renderNotifyComputerList('restartComputerList', restartSelectedComputers); }
+
+function commandSelectAll()    { allComputers.forEach(function(c){commandSelectedComputers.add(c.hostname);}); renderNotifyComputerList('commandComputerList', commandSelectedComputers); }
+function commandSelectOnline() { commandSelectedComputers.clear(); allComputers.filter(function(c){return c.status==='online';}).forEach(function(c){commandSelectedComputers.add(c.hostname);}); renderNotifyComputerList('commandComputerList', commandSelectedComputers); }
+function commandSelectNone()   { commandSelectedComputers.clear(); renderNotifyComputerList('commandComputerList', commandSelectedComputers); }
+
 
 function getCheckedDelays(containerId) {
   return Array.from(document.querySelectorAll('#' + containerId + ' input[type=checkbox]:checked'))
@@ -2596,6 +2713,19 @@ function machineQuickRestart() {
   restartSelectedComputers.clear();
   restartSelectedComputers.add(m);
   renderNotifyComputerList('restartComputerList', restartSelectedComputers);
+  panel.scrollIntoView({behavior:'smooth'});
+}
+
+function machineQuickCommand() {
+  if (!_currentMachine) return;
+  var m = _currentMachine;
+  closeMachineDetail();
+  var panel = document.getElementById('notifyPanelBody');
+  if (panel && !panel.classList.contains('open')) panel.previousElementSibling.click();
+  switchNotifyTab('command', document.querySelectorAll('.notify-tab')[2]);
+  commandSelectedComputers.clear();
+  commandSelectedComputers.add(m);
+  renderNotifyComputerList('commandComputerList', commandSelectedComputers);
   panel.scrollIntoView({behavior:'smooth'});
 }
 
