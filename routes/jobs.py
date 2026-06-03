@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
-from db import query
-from auth import login_required, verify_agent_token
+from Software_inventory.db import query
+from Software_inventory.auth import login_required, verify_agent_token
 
 jobs_bp = Blueprint('jobs', __name__)
 
