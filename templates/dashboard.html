@@ -481,6 +481,10 @@
             <input style="width:200px" id="newPkgDesc" placeholder="Description (optional)">
             <button class="add-pkg-btn" onclick="addInternalPackage()">+ Add</button>
           </div>
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <input id="internalInstallArgs" placeholder='Install arguments (optional, e.g. --installargs "/ALLUSERS=1")' style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px;font-family:var(--mono);outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+            <input id="internalPackageParams" placeholder='Package parameters (optional, e.g. /LANG=en)' style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px;font-family:var(--mono);outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+          </div>
 
           <div class="deploy-grid">
             <div class="deploy-col">
@@ -516,6 +520,10 @@
             <input id="communityPkgId" placeholder="Enter choco package ID (e.g. vlc, googlechrome, 7zip)">
             <input id="communityPkgName" placeholder="Display name (optional)">
             <a href="https://community.chocolatey.org/packages" target="_blank" style="display:inline-flex;align-items:center;gap:5px;padding:6px 12px;font-size:11px;font-family:var(--mono);background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:4px;text-decoration:none;white-space:nowrap;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent2)';this.style.color='var(--accent2)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">&#x1F50D; Browse Packages</a>
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+            <input id="communityInstallArgs" placeholder='Install arguments (optional, e.g. --installargs "/ALLUSERS=1")' style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px;font-family:var(--mono);outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
+            <input id="communityPackageParams" placeholder='Package parameters (optional, e.g. /LANG=en)' style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px;font-family:var(--mono);outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border)'">
           </div>
 
           <div class="deploy-grid">
@@ -1327,15 +1335,19 @@ async function runDeploy(action) {
   showDeployProgress('deployProgress', computers, 'pending');
 
   try {
+    var installArgs    = document.getElementById('internalInstallArgs')    ? document.getElementById('internalInstallArgs').value.trim()    : '';
+    var packageParams  = document.getElementById('internalPackageParams')  ? document.getElementById('internalPackageParams').value.trim()  : '';
     var res = await fetch('/api/jobs/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        package_id:   deploySelectedPkg.choco_id,
-        display_name: deploySelectedPkg.display_name,
-        action:       action,
-        source_url:   sourceUrl,
-        computers:    computers
+        package_id:     deploySelectedPkg.choco_id,
+        display_name:   deploySelectedPkg.display_name,
+        action:         action,
+        source_url:     sourceUrl,
+        install_args:   installArgs   || null,
+        package_params: packageParams || null,
+        computers:      computers
       })
     });
     var data = await res.json();
@@ -1368,15 +1380,19 @@ async function runCommunityDeploy(action) {
   showDeployProgress('communityDeployProgress', computers, 'pending');
 
   try {
+    var installArgs   = document.getElementById('communityInstallArgs')   ? document.getElementById('communityInstallArgs').value.trim()   : '';
+    var packageParams = document.getElementById('communityPackageParams') ? document.getElementById('communityPackageParams').value.trim() : '';
     var res = await fetch('/api/jobs/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        package_id:   chocoId,
-        display_name: name,
-        action:       action,
-        source_url:   null,
-        computers:    computers
+        package_id:     chocoId,
+        display_name:   name,
+        action:         action,
+        source_url:     null,
+        install_args:   installArgs   || null,
+        package_params: packageParams || null,
+        computers:      computers
       })
     });
     var data = await res.json();

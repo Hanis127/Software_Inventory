@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
-from Software_inventory.db import query
-from Software_inventory.auth import login_required, verify_agent_token
+from db import query
+from auth import login_required, verify_agent_token
 
 jobs_bp = Blueprint('jobs', __name__)
 
@@ -9,31 +9,37 @@ jobs_bp = Blueprint('jobs', __name__)
 @jobs_bp.route('/api/jobs', methods=['POST'])
 @login_required
 def create_job():
-    data         = request.json
-    computer     = data.get('computer')
-    package_id   = data.get('package_id')
-    display_name = data.get('display_name', package_id)
-    action       = data.get('action', 'upgrade')
-    source_url   = data.get('source_url')
+    data           = request.json
+    computer       = data.get('computer')
+    package_id     = data.get('package_id')
+    display_name   = data.get('display_name', package_id)
+    action         = data.get('action', 'upgrade')
+    source_url     = data.get('source_url')
+    install_args   = data.get('install_args')
+    package_params = data.get('package_params')
     row = query("SELECT id FROM computers WHERE hostname = %s",
                 (computer,), fetch='one')
     if not row:
         return jsonify({'error': 'Computer not found'}), 404
     result = query("""
-        INSERT INTO jobs (computer_id, package_id, display_name, status, action, source_url)
-        VALUES (%s, %s, %s, 'pending', %s, %s) RETURNING id
-    """, (row['id'], package_id, display_name, action, source_url), fetch='one')
+        INSERT INTO jobs (computer_id, package_id, display_name, status, action,
+                          source_url, install_args, package_params)
+        VALUES (%s, %s, %s, 'pending', %s, %s, %s, %s) RETURNING id
+    """, (row['id'], package_id, display_name, action, source_url,
+             install_args, package_params), fetch='one')
     return jsonify({'job_id': str(result['id'])})
 
 @jobs_bp.route('/api/jobs/bulk', methods=['POST'])
 @login_required
 def create_bulk_jobs():
-    data         = request.json
-    package_id   = data.get('package_id')
-    display_name = data.get('display_name', package_id)
-    action       = data.get('action', 'install')
-    source_url   = data.get('source_url')
-    hostnames    = data.get('computers', [])
+    data           = request.json
+    package_id     = data.get('package_id')
+    display_name   = data.get('display_name', package_id)
+    action         = data.get('action', 'install')
+    source_url     = data.get('source_url')
+    install_args   = data.get('install_args')
+    package_params = data.get('package_params')
+    hostnames      = data.get('computers', [])
     if not package_id or not hostnames:
         return jsonify({'error': 'package_id and computers required'}), 400
     job_ids = []
@@ -44,9 +50,10 @@ def create_bulk_jobs():
         if row:
             result = query("""
                 INSERT INTO jobs (computer_id, package_id, display_name,
-                                  status, action, source_url)
-                VALUES (%s, %s, %s, 'pending', %s, %s) RETURNING id
-            """, (row['id'], package_id, display_name, action, source_url),
+                                  status, action, source_url, install_args, package_params)
+                VALUES (%s, %s, %s, 'pending', %s, %s, %s, %s) RETURNING id
+            """, (row['id'], package_id, display_name, action, source_url,
+                     install_args, package_params),
             fetch='one')
             job_ids.append(str(result['id']))
         else:
@@ -131,7 +138,8 @@ def pending_jobs(hostname):
     if agent['hostname'].upper() != hostname.upper():
         return jsonify({'error': 'Forbidden'}), 403
     rows = query("""
-        SELECT j.id, j.package_id, j.display_name, j.action, j.source_url
+        SELECT j.id, j.package_id, j.display_name, j.action,
+               j.source_url, j.install_args, j.package_params
         FROM jobs j
         JOIN computers c ON c.id = j.computer_id
         WHERE c.hostname = %s AND j.status = 'pending'

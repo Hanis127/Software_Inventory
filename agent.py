@@ -355,6 +355,58 @@ def get_choco_outdated(internal_source=None):
 
     return outdated
 
+
+def get_all_source_packages(source=None):
+    """
+    Returns {choco_id: latest_version} for all packages available on a source.
+    Used to match display names to choco IDs even when not installed via choco.
+    """
+    pkg_map = {}
+    try:
+        cmd = ["choco", "search", "--all-versions", "--limit-output",
+               "--source", source or "https://community.chocolatey.org/api/v2/"]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120,
+            encoding='utf-8', errors='replace',
+            creationflags=0x08000000
+        )
+        seen = set()
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("|")
+            if len(parts) >= 2:
+                pkg_id = parts[0].strip().lower()
+                ver    = parts[1].strip()
+                if pkg_id not in seen:  # first result is latest when sorted desc
+                    pkg_map[pkg_id] = ver
+                    seen.add(pkg_id)
+    except Exception as e:
+        log(f"Source package list failed: {e}")
+    return pkg_map
+
+
+def get_choco_community_latest(choco_ids):
+    """Fetch latest community version for specific choco IDs."""
+    latest_map = {}
+    if not choco_ids:
+        return latest_map
+    for pkg_id in choco_ids:
+        try:
+            result = subprocess.run(
+                ["choco", "search", pkg_id, "--exact", "--limit-output",
+                 "--source", "https://community.chocolatey.org/api/v2/"],
+                capture_output=True, text=True, timeout=15,
+                encoding='utf-8', errors='replace',
+                creationflags=0x08000000
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split("|")
+                if len(parts) >= 2 and parts[0].strip().lower() == pkg_id.lower():
+                    latest_map[pkg_id.lower()] = parts[1].strip()
+                    break
+        except Exception as e:
+            log(f"Choco search failed for {pkg_id}: {e}")
+    return latest_map
+
 def match_choco_id(display_name, choco_map, nuspec_titles=None):
     if not display_name:
         return None
@@ -409,22 +461,52 @@ def collect_and_send(internal_source=None):
     choco_map      = get_choco_packages()
     choco_outdated = get_choco_outdated(internal_source=internal_source)
     nuspec_titles  = get_nuspec_titles()
+
+    # Build an extended map including packages available on the internal source.
+    # This lets us match display names for software not installed via choco
+    # (e.g. VLC installed via MSI but available on the internal share).
+    extended_choco_map = dict(choco_map)
+    if internal_source:
+        internal_pkgs = get_all_source_packages(internal_source)
+        log(f"Internal source has {len(internal_pkgs)} packages available")
+        # Add internal packages not already in choco_map
+        for pkg_id, ver in internal_pkgs.items():
+            if pkg_id not in extended_choco_map:
+                extended_choco_map[pkg_id] = ver
     log(f"Nuspec titles found: {len(nuspec_titles)}")
 
     log(f"Choco installed: {len(choco_map)} packages, outdated: {len(choco_outdated)}")
 
-    already_matched = set()
+    already_matched        = set()
+    needs_community_lookup = []
 
     for pkg in software:
-        pkg["choco_id"] = match_choco_id(pkg["display_name"], choco_map, nuspec_titles)
+        # Match against extended map (includes internal source packages)
+        pkg["choco_id"] = match_choco_id(pkg["display_name"], extended_choco_map, nuspec_titles)
         if pkg["choco_id"]:
             already_matched.add(pkg["choco_id"])
         if pkg["choco_id"] and pkg["choco_id"] in choco_outdated:
+            # Outdated — choco_outdated has the latest community version
             pkg["choco_latest"] = choco_outdated[pkg["choco_id"]]
         elif pkg["choco_id"] and pkg["choco_id"] in choco_map:
+            # Installed via choco and up to date — installed version is latest
             pkg["choco_latest"] = choco_map[pkg["choco_id"]]
+        elif pkg["choco_id"] and pkg["choco_id"] in extended_choco_map:
+            # Found on internal source but not installed via choco locally
+            # Queue for community version lookup
+            pkg["choco_latest"] = None
+            if pkg["choco_id"] not in needs_community_lookup:
+                needs_community_lookup.append(pkg["choco_id"])
         else:
             pkg["choco_latest"] = None
+
+    # Fetch community latest for packages matched via internal source but not installed via choco
+    if needs_community_lookup:
+        log(f"Fetching community latest for {len(needs_community_lookup)} packages...")
+        community_latest = get_choco_community_latest(needs_community_lookup)
+        for pkg in software:
+            if pkg["choco_id"] and pkg["choco_latest"] is None:
+                pkg["choco_latest"] = community_latest.get(pkg["choco_id"])
 
     for choco_id, installed_ver in choco_map.items():
         if choco_id not in already_matched:
@@ -486,13 +568,10 @@ def validate_source_url(url):
         return False
     return bool(VALID_SOURCE.match(normalize_unc(url)))
 
-def run_upgrade(package_id, source_url=None):
+def run_upgrade(package_id, source_url=None, install_args=None, package_params=None):
     # For upgrades, always include the community feed alongside any internal source.
-    # Passing --source exclusively would pin choco to that source only, causing
-    # "already latest version" when the internal share has an older build.
     try:
         if source_url:
-            # Combine internal source + community feed so choco picks the highest version
             combined = f"{source_url};https://community.chocolatey.org/api/v2/"
             log(f"Running: choco upgrade {package_id} --source <internal+community>")
             cmd = ["choco", "upgrade", package_id, "-y", "--no-progress",
@@ -500,6 +579,10 @@ def run_upgrade(package_id, source_url=None):
         else:
             log(f"Running: choco upgrade {package_id}")
             cmd = ["choco", "upgrade", package_id, "-y", "--no-progress"]
+        if install_args:
+            cmd += ["--installargs", install_args]
+        if package_params:
+            cmd += ["--params", package_params]
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
             encoding='utf-8', errors='replace',
@@ -509,12 +592,16 @@ def run_upgrade(package_id, source_url=None):
     except Exception as e:
         return False, str(e)
 
-def run_install(package_id, source_url=None):
+def run_install(package_id, source_url=None, install_args=None, package_params=None):
     log(f"Running: choco install {package_id}" + (f" --source {source_url}" if source_url else ""))
     try:
         cmd = ["choco", "install", package_id, "-y", "--no-progress"]
         if source_url:
             cmd += ["--source", source_url]
+        if install_args:
+            cmd += ["--installargs", install_args]
+        if package_params:
+            cmd += ["--params", package_params]
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=300,
             encoding='utf-8', errors='replace',
@@ -565,12 +652,15 @@ def poll_jobs():
             log(f"Job received: {action} {package_id}" + (f" from {source_url}" if source_url else ""))
             api_patch(f"/api/jobs/{job['id']}", {"status": "running", "output": ""})
 
+            install_args   = job.get('install_args')
+            package_params = job.get('package_params')
+
             if action == 'install':
-                success, output = run_install(package_id, source_url)
+                success, output = run_install(package_id, source_url, install_args, package_params)
             elif action == 'uninstall':
                 success, output = run_uninstall(package_id)
             else:
-                success, output = run_upgrade(package_id, source_url)
+                success, output = run_upgrade(package_id, source_url, install_args, package_params)
 
             status = "done" if success else "failed"
             api_patch(f"/api/jobs/{job['id']}", {
@@ -791,8 +881,8 @@ def handle_notification(job):
     if result == "do_restart":
         log("Executing scheduled restart...")
         subprocess.run(
-            ["shutdown", "/r", "/t", "3600", "/c",
-             "Scheduled system restart, save your work. Restarting in 1 hour."],
+            ["shutdown", "/r", "/t", "30", "/c",
+             "Scheduled system restart by IT. Restarting in 30 seconds."],
             capture_output=True
         )
 
