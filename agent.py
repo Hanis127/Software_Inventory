@@ -545,42 +545,6 @@ def run_uninstall(package_id):
         return False, str(e)
 
 
-#RUN COMMANDS
-# Strict GUID regex validation constraint: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
-GUID_REGEX = re.compile(r'^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$')
-
-def run_cmd_script(script_text):
-    try:
-        res = subprocess.run(['cmd.exe', '/c', script_text], capture_output=True, text=True, timeout=300)
-        return (res.returncode == 0), f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    except subprocess.TimeoutExpired:
-        return False, "ERROR: Command timed out (300s limit exceeded)."
-    except Exception as e:
-        return False, f"System Engine Failure: {str(e)}"
-
-def run_powershell_script(script_text):
-    try:
-        res = subprocess.run([
-            'powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script_text
-        ], capture_output=True, text=True, timeout=300)
-        return (res.returncode == 0), f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    except subprocess.TimeoutExpired:
-        return False, "ERROR: PowerShell timed out (300s limit exceeded)."
-    except Exception as e:
-        return False, f"System Engine Failure: {str(e)}"
-
-def run_msi_uninstall(guid):
-    if not GUID_REGEX.match(guid):
-        return False, f"SECURITY ERROR: Aborted. Provided payload failed strict GUID layout check: {repr(guid)}"
-    try:
-        # Runs a silent uninstall and suppresses forced system restarts completely
-        res = subprocess.run(['msiexec.exe', '/x', guid, '/qn', '/norestart'], capture_output=True, text=True, timeout=300)
-        success = res.returncode in (0, 3010) # 0 = success, 3010 = success but reboot required
-        return success, f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
-    except subprocess.TimeoutExpired:
-        return False, "ERROR: msiexec timed out (300s limit exceeded)."
-    except Exception as e:
-        return False, f"System Engine Failure: {str(e)}"
 # ── Job polling ───────────────────────────────────────────────────────────────
 def poll_jobs():
     hostname = socket.gethostname()
@@ -594,28 +558,6 @@ def poll_jobs():
             # Notification/restart jobs are handled by poll_notifications, not choco
             if action in ('notify', 'scheduled_restart'):
                 continue
-
-                # NEW: ADMINISTRATIVE TOOL INTERCEPTOR
-            if action in ('run_cmd', 'run_powershell', 'msi_uninstall'):
-                log(f"Job received (Admin Task): {action}")
-                api_patch(f"/api/jobs/{job['id']}", {"status": "running", "output": "Executing command payload..."})
-
-                payload = job.get('install_args', '')
-
-                if action == 'run_cmd':
-                    success, output = run_cmd_script(payload)
-                elif action == 'run_powershell':
-                    success, output = run_powershell_script(payload)
-                elif action == 'msi_uninstall':
-                    success, output = run_msi_uninstall(payload)
-
-                status = "done" if success else "failed"
-                api_patch(f"/api/jobs/{job['id']}", {
-                    "status": status,
-                    "output": output[-3000:]
-                })
-                log(f"Job {job['id']} finished: {status}")
-                continue  # Skip standard chocolatey logic checks below
 
             # Validate before executing anything
             if not validate_package_id(package_id):
