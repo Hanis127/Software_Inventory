@@ -815,12 +815,7 @@
       <div style="margin-top:8px;display:flex;align-items:center;gap:12px">
         <button class="deploy-btn" style="background:var(--danger);color:var(--bg)" onclick="executeCommand()">&#9888; Execute Command</button>
         <span id="cmdStatus" style="font-size:11px;font-family:var(--mono);color:var(--muted)"></span>
-
       </div>
-                  <div id="cmdTerminalWrapper" style="display:none; margin-top:15px;">
-  <label style="font-size:11px; color:var(--muted)">Last Execution Result:</label>
-  <pre id="cmdTerminal" style="background:#1e1e1e; color:#f1f1f1; font-family:var(--mono); font-size:12px; padding:12px; border-radius:4px; max-height:200px; overflow-y:auto; margin-top:4px; border:1px solid #333; white-space:pre-wrap;"></pre>
-</div>
     </div>
 
         <!-- ── Active ── -->
@@ -2224,17 +2219,13 @@ async function executeCommand() {
     const result = await response.json();
 
     if (response.ok) {
-  statusEl.textContent = `🚀 Queued! Waiting for agent response...`;
-  statusEl.style.color = "var(--warn)";
+      statusEl.textContent = `🚀 Successfully queued ${result.queued} jobs!`;
+      statusEl.style.color = "var(--success)";
+      document.getElementById('cmdBody').value = '';
 
-  const jobId = result.job_ids[0]; // Let's track the first machine's output for preview
-  if (jobId) {
-    pollCommandOutput(jobId);
-  }
-
-  document.getElementById('cmdBody').value = '';
-  commandSelectedComputers.clear();
-  renderNotifyComputerList('commandComputerList', commandSelectedComputers);
+      // Optional: Clear selection after deployment like a clean workflow
+      commandSelectedComputers.clear();
+      renderNotifyComputerList('commandComputerList', commandSelectedComputers);
     } else {
       statusEl.textContent = `❌ Server Error: ${result.error || 'Failed to execute'}`;
       statusEl.style.color = "var(--danger)";
@@ -2540,37 +2531,6 @@ function toggleMachinePanel(header) {
   var toggle = header.querySelector('.panel-toggle');
   body.classList.toggle('open');
   toggle.classList.toggle('open');
-}
-
-function pollCommandOutput(jobId, attempts = 0) {
-  const termWrapper = document.getElementById('cmdTerminalWrapper');
-  const termEl = document.getElementById('cmdTerminal');
-  const statusEl = document.getElementById('cmdStatus');
-
-  if (attempts > 50) { // Stop checking after 100 seconds //
-    statusEl.textContent = "⏱️ Command is taking a while. Check History tab later.";
-    return;
-  }
-
-  // Adjust this endpoint URL to match your server route for fetching a single job's status
-  fetch(`/api/jobs/${jobId}`)
-    .then(res => res.json())
-    .then(job => {
-      if (job.status === 'done' || job.status === 'failed') {
-        statusEl.textContent = job.status === 'done' ? "✅ Execution Completed!" : "❌ Execution Failed";
-        statusEl.style.color = job.status === 'done' ? "var(--success)" : "var(--danger)";
-
-        // Show terminal box and fill it with output text
-        termWrapper.style.display = 'block';
-        termEl.textContent = job.output || "Job completed with no text output returned.";
-      } else {
-        // Still pending or running? Wait 2 seconds and look again
-        setTimeout(() => pollCommandOutput(jobId, attempts + 1), 2000);
-      }
-    })
-    .catch(err => {
-      console.error("Error fetching job status:", err);
-    });
 }
 
 async function loadMachineDetail(hostname) {
