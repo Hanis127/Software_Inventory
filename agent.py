@@ -13,6 +13,9 @@ import ssl
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+# ── Version ─────────────────────────────────────────────────────────────────
+AGENT_VERSION = "2026.06.01"
+
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
 # Use sys.executable when frozen (PyInstaller), __file__ otherwise (dev/testing).
@@ -324,11 +327,13 @@ def get_choco_packages():
     return choco_map
 
 def get_choco_outdated(internal_source=None):
-    """Returns {choco_id: latest_version} for outdated packages.
-    Runs against community feed and optionally internal source, merges results."""
+    """Returns {choco_id: latest_version} combining community and internal sources.
+    Runs community feed explicitly so internal source doesn't shadow newer versions.
+    Takes the highest version from all sources per package."""
     outdated = {}
 
-    def run_outdated(extra_args=[]):
+    def parse_outdated(extra_args):
+        result_map = {}
         try:
             result = subprocess.run(
                 ["choco", "outdated", "--limit-output"] + extra_args,
@@ -341,19 +346,93 @@ def get_choco_outdated(internal_source=None):
                 if len(parts) >= 3:
                     pkg_id = parts[0].strip().lower()
                     latest = parts[2].strip()
-                    outdated[pkg_id] = latest
+                    result_map[pkg_id] = latest
         except Exception as e:
             log(f"Choco outdated failed {extra_args}: {e}")
+        return result_map
 
-    # Community feed
-    run_outdated()
+    def version_key(v):
+        try:
+            return [int(x) for x in re.sub(r'[^0-9.]', '', v).split('.') if x]
+        except Exception:
+            return [0]
 
-    # Internal feed
+    def take_higher(existing, new_map):
+        for pkg_id, latest in new_map.items():
+            if pkg_id not in existing:
+                existing[pkg_id] = latest
+            else:
+                if version_key(latest) > version_key(existing[pkg_id]):
+                    existing[pkg_id] = latest
+
+    # Always query community feed explicitly — prevents internal source shadowing newer versions
+    community = parse_outdated(["--source", "https://community.chocolatey.org/api/v2/"])
+    take_higher(outdated, community)
+
+    # Also query internal source if configured
     if internal_source:
-        run_outdated(["--source", internal_source])
+        internal = parse_outdated(["--source", internal_source])
+        take_higher(outdated, internal)
         log(f"Checked internal source for outdated: {internal_source}")
 
+    # Fall back to default sources for anything not caught above
+    # (catches packages not on community feed)
+    default = parse_outdated([])
+    take_higher(outdated, default)
+
     return outdated
+
+
+def get_all_source_packages(source=None):
+    """
+    Returns {choco_id: latest_version} for all packages available on a source.
+    Used to match display names to choco IDs even when not installed via choco.
+    """
+    pkg_map = {}
+    try:
+        cmd = ["choco", "search", "--all-versions", "--limit-output",
+               "--source", source or "https://community.chocolatey.org/api/v2/"]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120,
+            encoding='utf-8', errors='replace',
+            creationflags=0x08000000
+        )
+        seen = set()
+        for line in result.stdout.strip().splitlines():
+            parts = line.split("|")
+            if len(parts) >= 2:
+                pkg_id = parts[0].strip().lower()
+                ver    = parts[1].strip()
+                if pkg_id not in seen:  # first result is latest when sorted desc
+                    pkg_map[pkg_id] = ver
+                    seen.add(pkg_id)
+    except Exception as e:
+        log(f"Source package list failed: {e}")
+    return pkg_map
+
+
+def get_choco_community_latest(choco_ids):
+    """Fetch latest community version for specific choco IDs."""
+    latest_map = {}
+    if not choco_ids:
+        return latest_map
+    for pkg_id in choco_ids:
+        try:
+            result = subprocess.run(
+                ["choco", "search", pkg_id, "--exact", "--limit-output",
+                 "--source", "https://community.chocolatey.org/api/v2/"],
+                capture_output=True, text=True, timeout=15,
+                encoding='utf-8', errors='replace',
+                creationflags=0x08000000
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split("|")
+                if len(parts) >= 2 and parts[0].strip().lower() == pkg_id.lower():
+                    latest_map[pkg_id.lower()] = parts[1].strip()
+                    break
+        except Exception as e:
+            log(f"Choco search failed for {pkg_id}: {e}")
+    return latest_map
 
 def match_choco_id(display_name, choco_map, nuspec_titles=None):
     if not display_name:
@@ -409,14 +488,28 @@ def collect_and_send(internal_source=None):
     choco_map      = get_choco_packages()
     choco_outdated = get_choco_outdated(internal_source=internal_source)
     nuspec_titles  = get_nuspec_titles()
+
+    # Build an extended map including packages available on the internal source.
+    # This lets us match display names for software not installed via choco
+    # (e.g. VLC installed via MSI but available on the internal share).
+    extended_choco_map = dict(choco_map)
+    if internal_source:
+        internal_pkgs = get_all_source_packages(internal_source)
+        log(f"Internal source has {len(internal_pkgs)} packages available")
+        # Add internal packages not already in choco_map
+        for pkg_id, ver in internal_pkgs.items():
+            if pkg_id not in extended_choco_map:
+                extended_choco_map[pkg_id] = ver
     log(f"Nuspec titles found: {len(nuspec_titles)}")
 
     log(f"Choco installed: {len(choco_map)} packages, outdated: {len(choco_outdated)}")
 
-    already_matched = set()
+    already_matched        = set()
+    needs_community_lookup = []
 
     for pkg in software:
-        pkg["choco_id"] = match_choco_id(pkg["display_name"], choco_map, nuspec_titles)
+        # Match against extended map (includes internal source packages)
+        pkg["choco_id"] = match_choco_id(pkg["display_name"], extended_choco_map, nuspec_titles)
         if pkg["choco_id"]:
             already_matched.add(pkg["choco_id"])
         if pkg["choco_id"] and pkg["choco_id"] in choco_outdated:
@@ -425,8 +518,22 @@ def collect_and_send(internal_source=None):
         elif pkg["choco_id"] and pkg["choco_id"] in choco_map:
             # Installed via choco and up to date — installed version is latest
             pkg["choco_latest"] = choco_map[pkg["choco_id"]]
+        elif pkg["choco_id"] and pkg["choco_id"] in extended_choco_map:
+            # Found on internal source but not installed via choco locally
+            # Queue for community version lookup
+            pkg["choco_latest"] = None
+            if pkg["choco_id"] not in needs_community_lookup:
+                needs_community_lookup.append(pkg["choco_id"])
         else:
             pkg["choco_latest"] = None
+
+    # Fetch community latest for packages matched via internal source but not installed via choco
+    if needs_community_lookup:
+        log(f"Fetching community latest for {len(needs_community_lookup)} packages...")
+        community_latest = get_choco_community_latest(needs_community_lookup)
+        for pkg in software:
+            if pkg["choco_id"] and pkg["choco_latest"] is None:
+                pkg["choco_latest"] = community_latest.get(pkg["choco_id"])
 
     for choco_id, installed_ver in choco_map.items():
         if choco_id not in already_matched:
@@ -444,10 +551,11 @@ def collect_and_send(internal_source=None):
     log(f"Found {len(software)} packages, {matched} matched to Chocolatey")
 
     payload = {
-        "hostname":   hostname,
-        "ip_address": ip,
-        "os_version": os_ver,
-        "software":   software
+        "hostname":      hostname,
+        "ip_address":    ip,
+        "os_version":    os_ver,
+        "agent_version": AGENT_VERSION,
+        "software":      software
     }
 
     try:
