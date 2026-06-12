@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.06.01"
+AGENT_VERSION = "2026.06.04"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -653,13 +653,14 @@ def run_uninstall(package_id):
         return False, str(e)
 
 
-#RUN COMMANDS
-# Strict GUID regex validation constraint: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
+# ── Run Commands ────────────────────────────────────────────────────────────
+# Strict GUID regex validation: {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}
 GUID_REGEX = re.compile(r'^\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}$')
 
 def run_cmd_script(script_text):
     try:
-        res = subprocess.run(['cmd.exe', '/c', script_text], capture_output=True, text=True, timeout=300)
+        res = subprocess.run(['cmd.exe', '/c', script_text], capture_output=True, text=True, timeout=300,
+                              creationflags=0x08000000)
         return (res.returncode == 0), f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     except subprocess.TimeoutExpired:
         return False, "ERROR: Command timed out (300s limit exceeded)."
@@ -670,7 +671,7 @@ def run_powershell_script(script_text):
     try:
         res = subprocess.run([
             'powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script_text
-        ], capture_output=True, text=True, timeout=300)
+        ], capture_output=True, text=True, timeout=300, creationflags=0x08000000)
         return (res.returncode == 0), f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     except subprocess.TimeoutExpired:
         return False, "ERROR: PowerShell timed out (300s limit exceeded)."
@@ -681,14 +682,61 @@ def run_msi_uninstall(guid):
     if not GUID_REGEX.match(guid):
         return False, f"SECURITY ERROR: Aborted. Provided payload failed strict GUID layout check: {repr(guid)}"
     try:
-        # Runs a silent uninstall and suppresses forced system restarts completely
-        res = subprocess.run(['msiexec.exe', '/x', guid, '/qn', '/norestart'], capture_output=True, text=True, timeout=300)
-        success = res.returncode in (0, 3010) # 0 = success, 3010 = success but reboot required
+        res = subprocess.run(['msiexec.exe', '/x', guid, '/qn', '/norestart'], capture_output=True, text=True,
+                              timeout=300, creationflags=0x08000000)
+        success = res.returncode in (0, 3010)  # 0 = success, 3010 = success but reboot required
         return success, f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     except subprocess.TimeoutExpired:
         return False, "ERROR: msiexec timed out (300s limit exceeded)."
     except Exception as e:
         return False, f"System Engine Failure: {str(e)}"
+
+
+def run_agent_update():
+    """Download the latest agent exe and launch the updater to swap it in."""
+    new_exe_path = os.path.join(_exe_dir, "dmcpatchagent_new.exe")
+    updater_path = os.path.join(_exe_dir, "updater.exe")
+
+    if not os.path.exists(updater_path):
+        return False, f"updater.exe not found at {updater_path} - cannot self-update"
+
+    log("Downloading new agent build...")
+    try:
+        req = urllib.request.Request(
+            f"{SERVER_URL}/api/agent/download",
+            headers=_auth_headers(),
+            method='GET'
+        )
+        with urllib.request.urlopen(req, timeout=120, context=_ssl_ctx) as r:
+            data = r.read()
+    except Exception as e:
+        return False, f"Download failed: {e}"
+
+    if len(data) < 1024 * 100:  # sanity check - exe should be at least ~100KB
+        return False, f"Downloaded file too small ({len(data)} bytes), aborting"
+
+    try:
+        with open(new_exe_path, 'wb') as f:
+            f.write(data)
+        log(f"New agent build saved to {new_exe_path} ({len(data)} bytes)")
+    except Exception as e:
+        return False, f"Failed to save new exe: {e}"
+
+    try:
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        subprocess.Popen(
+            [updater_path],
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+            close_fds=True
+        )
+        log("Updater launched - service will restart shortly")
+    except Exception as e:
+        return False, f"Failed to launch updater: {e}"
+
+    return True, f"Update downloaded ({len(data)} bytes). Updater launched - agent will restart."
+
+
 # ── Job polling ───────────────────────────────────────────────────────────────
 def poll_jobs():
     hostname = socket.gethostname()
@@ -703,8 +751,8 @@ def poll_jobs():
             if action in ('notify', 'scheduled_restart'):
                 continue
 
-                # NEW: ADMINISTRATIVE TOOL INTERCEPTOR
-            if action in ('run_cmd', 'run_powershell', 'msi_uninstall'):
+            # Administrative tool interceptor — run_cmd, run_powershell, msi_uninstall, agent_update
+            if action in ('run_cmd', 'run_powershell', 'msi_uninstall', 'agent_update'):
                 log(f"Job received (Admin Task): {action}")
                 api_patch(f"/api/jobs/{job['id']}", {"status": "running", "output": "Executing command payload..."})
 
@@ -716,6 +764,8 @@ def poll_jobs():
                     success, output = run_powershell_script(payload)
                 elif action == 'msi_uninstall':
                     success, output = run_msi_uninstall(payload)
+                elif action == 'agent_update':
+                    success, output = run_agent_update()
 
                 status = "done" if success else "failed"
                 api_patch(f"/api/jobs/{job['id']}", {
@@ -756,6 +806,7 @@ def poll_jobs():
             log(f"Job {job['id']} finished: {status}")
     except Exception as e:
         log(f"Job poll error: {e}")
+
 
 
 # ── Notifications ─────────────────────────────────────────────────────────────

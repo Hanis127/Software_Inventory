@@ -66,7 +66,7 @@ def is_agent_path(path):
 
 def is_self_auth_path(path):
     # Paths that handle their own auth internally -- bypass before_request check.
-    self_auth = ['/api/jobs/', '/api/jobs', '/api/notify/']
+    self_auth = ['/api/jobs/', '/api/jobs', '/api/notify/', '/api/agent/download']
     return any(path.startswith(p) for p in self_auth)
 
 # ── Enrollment password ───────────────────────────────────────────────────────
