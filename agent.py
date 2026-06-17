@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.06.05"
+AGENT_VERSION = "2026.06.07"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -308,12 +308,26 @@ def get_nuspec_titles():
         log(f"Nuspec title scan failed: {e}")
     return titles
 
+def _choco_exe():
+    """Return the choco executable path, falling back to the default install location."""
+    import shutil
+    if shutil.which("choco"):
+        return "choco"
+    default = r"C:\ProgramData\chocolatey\bin\choco.exe"
+    if os.path.exists(default):
+        return default
+    return "choco"  # will fail with a clear error
+
+CHOCO = _choco_exe()
+
+
 def get_choco_packages():
     """Returns {choco_id: installed_version} for all locally installed choco packages."""
     choco_map = {}
     try:
+        # "--local-only" was removed in choco 2.x; plain "list" lists local packages
         result = subprocess.run(
-            ["choco", "list", "--local-only", "--limit-output"],
+            ["choco", "list", "--limit-output"],
             capture_output=True, text=True, timeout=30,
             encoding='utf-8', errors='replace',
             creationflags=0x08000000
@@ -568,6 +582,29 @@ def run_powershell_script(script_text):
     except Exception as e:
         return False, f"System Engine Failure: {str(e)}"
 
+
+def run_msi_guid_search(script_text):
+    try:
+        # We target both 64-bit and 32-bit HKLM paths where MSIs store their GUIDs
+        ps_command = (
+            f"$paths = @('HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall', "
+            f"'HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'); "
+            f"Get-ChildItem -Path $paths -ErrorAction SilentlyContinue | Get-ItemProperty | "
+            f"Where-Object {{ $_.DisplayName -like '*{script_text}*' }} | "
+            f"Select-Object -ExpandProperty PSChildName"
+        )
+
+        res = subprocess.run([
+            'powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
+            ps_command
+        ], capture_output=True, text=True, timeout=300, creationflags=0x08000000)
+
+        return (res.returncode == 0), f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
+    except subprocess.TimeoutExpired:
+        return False, "ERROR: PowerShell timed out (300s limit exceeded)."
+    except Exception as e:
+        return False, f"System Engine Failure: {str(e)}"
+
 def run_msi_uninstall(guid):
     if not GUID_REGEX.match(guid):
         return False, f"SECURITY ERROR: Aborted. Provided payload failed strict GUID layout check: {repr(guid)}"
@@ -641,8 +678,8 @@ def poll_jobs():
             if action in ('notify', 'scheduled_restart'):
                 continue
 
-            # Administrative tool interceptor — run_cmd, run_powershell, msi_uninstall, agent_update
-            if action in ('run_cmd', 'run_powershell', 'msi_uninstall', 'agent_update'):
+            # Administrative tool interceptor — run_cmd, run_powershell, run_msi_guid_search, msi_uninstall, agent_update
+            if action in ('run_cmd', 'run_powershell', 'run_msi_guid_search', 'msi_uninstall', 'agent_update'):
                 log(f"Job received (Admin Task): {action}")
                 api_patch(f"/api/jobs/{job['id']}", {"status": "running", "output": "Executing command payload..."})
 
@@ -652,6 +689,8 @@ def poll_jobs():
                     success, output = run_cmd_script(payload)
                 elif action == 'run_powershell':
                     success, output = run_powershell_script(payload)
+                elif action == 'run_msi_guid_search':
+                    success, output = run_msi_guid_search(payload)
                 elif action == 'msi_uninstall':
                     success, output = run_msi_uninstall(payload)
                 elif action == 'agent_update':

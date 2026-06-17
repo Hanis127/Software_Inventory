@@ -794,6 +794,7 @@
               <option value="run_cmd">Command Prompt (cmd.exe)</option>
               <option value="run_powershell">PowerShell</option>
               <option value="run_msi_uninstall">enter full GUID to uninstall msi "{ED41CD4E-33BB-400C-AB20-B09388DC83EF}"</option>
+              <option value="run_msi_guid_search">enter program name "7-zip"</option>
             </select>
           </div>
           <div class="notify-field">
@@ -2189,7 +2190,7 @@ async function executeCommand() {
   let payloadArgs = cmdBody;
 
   if (cmdType === 'run_msi_uninstall') {
-    payloadAction = 'msi_uninstall';
+    payloadAction = 'msi_uninstall'; // Matches your backend tuple choice
     let bareGuid = cmdBody.replace(/[{}"']/g, '').trim().toUpperCase();
     const guidPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
 
@@ -2213,20 +2214,37 @@ async function executeCommand() {
   statusEl.textContent = "⏳ Queueing jobs on server...";
   statusEl.style.color = "var(--muted)";
 
-  // 4. Dispatch Request
+  // ─── 4. DETERMINE CLEAN LOGGING LABELS FOR DASHBOARD HISTORY ───
+  let packageId = 'system_command';
+  let displayName = 'Remote Script';
+
+  if (payloadAction === 'msi_uninstall') {
+    packageId = 'msi_removal';
+    displayName = `Uninstall MSI (${payloadArgs})`;
+  } else if (payloadAction === 'run_msi_guid_search') {
+    packageId = 'system_command';
+    displayName = `MSI GUID Search: "${payloadArgs}"`; // <-- RESTORED EXPLICIT LOGGING
+  } else if (payloadAction === 'run_cmd') {
+    displayName = 'CMD Script';
+  } else if (payloadAction === 'run_powershell') {
+    displayName = 'PowerShell Script';
+  }
+
+  // 5. Dispatch Request
   try {
     const response = await fetch('/api/jobs/bulk', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        package_id: payloadAction === 'msi_uninstall' ? 'msi_removal' : 'system_command',
-        display_name: payloadAction === 'msi_uninstall' ? `Uninstall msi (${payloadArgs})` : (payloadAction === 'run_cmd' ? 'CMD Script' : 'PowerShell Script'),
+        package_id: packageId,
+        display_name: displayName,
         action: payloadAction,
         install_args: payloadArgs,
         computers: selectedComputers
       })
     });
 
+    // ─── RESTORED MISSING TERMINATION BLOCK ───
     const result = await response.json();
 
     if (response.ok) {
@@ -2245,8 +2263,10 @@ async function executeCommand() {
       statusEl.textContent = `❌ Server Error: ${result.error || 'Failed to execute'}`;
       statusEl.style.color = "var(--danger)";
     }
-  } catch (err) {
-    statusEl.textContent = `❌ Network Error: ${err.message}`;
+
+  } catch (error) {
+    console.error("Command Center Transmission Error:", error);
+    statusEl.textContent = "❌ System Failure: Could not reach execution backend.";
     statusEl.style.color = "var(--danger)";
   }
 }
