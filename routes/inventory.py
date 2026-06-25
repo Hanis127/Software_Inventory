@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from Software_inventory.db import query, get_conn
+from Software_inventory.db import query, db_pool
 from Software_inventory.auth import login_required, verify_agent_token
 import psycopg2.extras
 import os
@@ -22,7 +22,8 @@ def receive_inventory():
     agent_version = data.get("agent_version")
     software      = data.get("software", [])
 
-    with get_conn() as conn:
+    conn = db_pool.getconn()  # Get a connection from the pool
+    with conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # Upsert computer
             cur.execute("""
