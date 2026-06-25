@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.06.07"
+AGENT_VERSION = "2026.06.09"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -516,7 +516,7 @@ def run_upgrade(package_id, source_url=None, install_args=None, package_params=N
         if package_params:
             cmd += ["--params", package_params]
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=300,
+            cmd, capture_output=True, text=True, timeout=600,
             encoding='utf-8', errors='replace',
             creationflags=0x08000000
         )
@@ -535,7 +535,7 @@ def run_install(package_id, source_url=None, install_args=None, package_params=N
         if package_params:
             cmd += ["--params", package_params]
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=300,
+            cmd, capture_output=True, text=True, timeout=600,
             encoding='utf-8', errors='replace',
             creationflags=0x08000000
         )
@@ -548,7 +548,7 @@ def run_uninstall(package_id):
     try:
         result = subprocess.run(
             ["choco", "uninstall", package_id, "-y", "--no-progress"],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True, text=True, timeout=600,
             encoding='utf-8', errors='replace',
             creationflags=0x08000000
         )
@@ -610,7 +610,7 @@ def run_msi_uninstall(guid):
         return False, f"SECURITY ERROR: Aborted. Provided payload failed strict GUID layout check: {repr(guid)}"
     try:
         res = subprocess.run(['msiexec.exe', '/x', guid, '/qn', '/norestart'], capture_output=True, text=True,
-                              timeout=300, creationflags=0x08000000)
+                              timeout=600, creationflags=0x08000000)
         success = res.returncode in (0, 3010)  # 0 = success, 3010 = success but reboot required
         return success, f"Exit Code: {res.returncode}\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}"
     except subprocess.TimeoutExpired:
