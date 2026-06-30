@@ -10,11 +10,12 @@ import logging
 import winreg
 import re
 import ssl
+import random
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.06.09"
+AGENT_VERSION = "2026.06.10"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -1004,6 +1005,8 @@ def main():
     if should_rotate():
         rotate_token()
 
+    time.sleep(random.uniform(0, 300))
+
     while True:
         now = time.time()
 
@@ -1017,7 +1020,7 @@ def main():
 
         poll_jobs()
         poll_notifications()
-        time.sleep(POLL_INTERVAL)
+        time.sleep(POLL_INTERVAL + random.randint(0, 15))
 
 if __name__ == "__main__":
     main()
