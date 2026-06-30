@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
-from Software_inventory.db import query, db_pool
-from Software_inventory.auth import login_required, verify_agent_token
+from db import query, db_pool
+from auth import login_required, verify_agent_token
 import psycopg2.extras
 import os
 import requests, re, threading
@@ -22,40 +22,45 @@ def receive_inventory():
     agent_version = data.get("agent_version")
     software      = data.get("software", [])
 
-    conn = db_pool.getconn()  # Get a connection from the pool
-    with conn:
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # Upsert computer
-            cur.execute("""
-                INSERT INTO computers (hostname, ip_address, os_version, last_seen, status, agent_version)
-                VALUES (%s, %s, %s, NOW(), 'online', %s)
-                ON CONFLICT (hostname) DO UPDATE SET
-                    ip_address   = EXCLUDED.ip_address,
-                    os_version   = EXCLUDED.os_version,
-                    last_seen    = NOW(),
-                    status       = 'online',
-                    agent_version = EXCLUDED.agent_version
-                RETURNING id
-            """, (hostname, ip, os_ver, agent_version))
-            computer_id = cur.fetchone()["id"]
-
-            # Replace software for this machine
-            cur.execute("DELETE FROM software WHERE computer_id = %s", (computer_id,))
-
-            for pkg in software:
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Upsert computer
                 cur.execute("""
-                    INSERT INTO software
-                        (computer_id, display_name, display_version, publisher,
-                         install_date, choco_id)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    computer_id,
-                    pkg.get("display_name"),
-                    pkg.get("display_version"),
-                    pkg.get("publisher"),
-                    pkg.get("install_date"),
-                    pkg.get("choco_id"),
-                ))
+                    INSERT INTO computers (hostname, ip_address, os_version, last_seen, status, agent_version)
+                    VALUES (%s, %s, %s, NOW(), 'online', %s)
+                    ON CONFLICT (hostname) DO UPDATE SET
+                        ip_address   = EXCLUDED.ip_address,
+                        os_version   = EXCLUDED.os_version,
+                        last_seen    = NOW(),
+                        status       = 'online',
+                        agent_version = EXCLUDED.agent_version
+                    RETURNING id
+                """, (hostname, ip, os_ver, agent_version))
+                computer_id = cur.fetchone()["id"]
+
+                # Replace software for this machine
+                cur.execute("DELETE FROM software WHERE computer_id = %s", (computer_id,))
+
+                for pkg in software:
+                    cur.execute("""
+                        INSERT INTO software
+                            (computer_id, display_name, display_version, publisher,
+                             install_date, choco_id)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (
+                        computer_id,
+                        pkg.get("display_name"),
+                        pkg.get("display_version"),
+                        pkg.get("publisher"),
+                        pkg.get("install_date"),
+                        pkg.get("choco_id"),
+                    ))
+    finally:
+        # This block executes even if an error occurs inside the 'with' block
+        db_pool.putconn(conn)
 
     # Kick off a background refresh of any stale choco_id versions seen in
     # this payload. Doesn't block the agent's response.
