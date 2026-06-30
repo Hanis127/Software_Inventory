@@ -1,6 +1,8 @@
 from flask import Blueprint, jsonify, request
-from Software_inventory.db import query
-from Software_inventory.auth import login_required, verify_agent_token
+from db import query
+from auth import login_required, verify_agent_token
+import time
+import random
 
 jobs_bp = Blueprint('jobs', __name__)
 
@@ -40,24 +42,33 @@ def create_bulk_jobs():
     install_args   = data.get('install_args')
     package_params = data.get('package_params')
     hostnames      = data.get('computers', [])
+    batch_size     = int(data.get('batch_size', 10))
+    batch_delay    = int(data.get('batch_delay_seconds', 90))
+
     if not package_id or not hostnames:
         return jsonify({'error': 'package_id and computers required'}), 400
+
     job_ids = []
     skipped = []
-    for hostname in hostnames:
+    for i, hostname in enumerate(hostnames):
         row = query("SELECT id FROM computers WHERE hostname = %s",
                     (hostname,), fetch='one')
         if row:
+            delay_seconds = (i // batch_size) * batch_delay
             result = query("""
                 INSERT INTO jobs (computer_id, package_id, display_name,
-                                  status, action, source_url, install_args, package_params)
-                VALUES (%s, %s, %s, 'pending', %s, %s, %s, %s) RETURNING id
+                                  status, action, source_url, install_args,
+                                  package_params, scheduled_at)
+                VALUES (%s, %s, %s, 'pending', %s, %s, %s, %s,
+                        NOW() + (%s || ' seconds')::interval)
+                RETURNING id
             """, (row['id'], package_id, display_name, action, source_url,
-                     install_args, package_params),
+                  install_args, package_params, delay_seconds),
             fetch='one')
             job_ids.append(str(result['id']))
         else:
             skipped.append(hostname)
+
     return jsonify({'ok': True, 'queued': len(job_ids),
                     'job_ids': job_ids, 'skipped': skipped})
 
@@ -142,7 +153,9 @@ def pending_jobs(hostname):
                j.source_url, j.install_args, j.package_params
         FROM jobs j
         JOIN computers c ON c.id = j.computer_id
-        WHERE c.hostname = %s AND j.status = 'pending'
+        WHERE c.hostname = %s 
+          AND j.status = 'pending'
+          AND (j.scheduled_at IS NULL OR j.scheduled_at <= NOW())  -- add this
         ORDER BY j.created_at
     """, (hostname,), fetch='all')
     return jsonify([dict(r) for r in rows])
