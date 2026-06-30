@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify
-from Software_inventory.db  import query
+from db  import query
 import os
 
 computers_bp = Blueprint('computers', __name__)

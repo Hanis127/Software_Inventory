@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from Software_inventory.db import query
+from db import query
 
 config_bp = Blueprint('config', __name__)
 

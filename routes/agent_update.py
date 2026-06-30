@@ -1,6 +1,6 @@
 import os
 from flask import Blueprint, jsonify, send_file, current_app
-from Software_inventory.auth import login_required, verify_agent_token
+from auth import login_required, verify_agent_token
 
 agent_update_bp = Blueprint('agent_update', __name__)
 

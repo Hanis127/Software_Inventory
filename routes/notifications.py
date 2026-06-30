@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
-from Software_inventory.db import query
-from Software_inventory.auth import login_required, verify_agent_token
+from db import query
+from auth import login_required, verify_agent_token
 from datetime import datetime, timezone
 import json
 

@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, session
 from functools import wraps
-from Software_inventory.db import query
+from db import query
 import hashlib
 import os
 import secrets
