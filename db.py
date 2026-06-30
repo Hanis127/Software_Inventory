@@ -8,7 +8,7 @@ load_dotenv()
 
 # Initialize the pool globally
 db_pool = psycopg2.pool.ThreadedConnectionPool(
-    1, 20, # minconn, maxconn
+    1, 80, # minconn, maxconn
     host=os.getenv("DB_HOST", "localhost"),
     database=os.getenv("DB_NAME", "inventory"),
     user=os.getenv("DB_USER"),
@@ -17,15 +17,21 @@ db_pool = psycopg2.pool.ThreadedConnectionPool(
 )
 
 def query(sql, params=None, fetch=None):
-    conn = db_pool.getconn() # Get a connection from the pool
+    conn = None
     try:
-        with conn: # Starts transaction
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(sql, params or ())
-                if fetch == 'all':
-                    return cur.fetchall()
-                if fetch == 'one':
-                    return cur.fetchone()
-                return None
+        conn = db_pool.getconn()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql, params or ())
+            result = None
+            if fetch == 'all':
+                result = cur.fetchall()
+            elif fetch == 'one':
+                result = cur.fetchone()
+            conn.commit()
+            return result
+    except Exception as e:
+        if conn: conn.rollback()
+        raise e # Re-raise to log the actual error
     finally:
-        db_pool.putconn(conn) # Return the connection to the pool
+        if conn:
+            db_pool.putconn(conn) # MANDATORY: Return the connection
