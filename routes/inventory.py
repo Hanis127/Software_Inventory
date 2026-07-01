@@ -82,6 +82,7 @@ def get_inventory():
     rows = query("""
         SELECT
             c.hostname      AS computer,
+            c.ip_address,
             c.status,
             s.display_name,
             s.display_version,

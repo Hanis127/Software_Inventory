@@ -700,6 +700,147 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
 
     <!-- ── Packages ───────────────────────────────────────────────────────── -->
     <div class="page" id="page-packages">
+      <!-- Packages sub-tabs -->
+      <div class="sub-tabs" style="margin-bottom:16px">
+        <button class="sub-tab active" id="pkgSubTabInventory" onclick="switchPkgTab('inventory',this)">Inventory</button>
+        <button class="sub-tab" id="pkgSubTabActions" onclick="switchPkgTab('actions',this)">⚡ Inventory Actions</button>
+      </div>
+
+      <!-- ── Inventory Actions panel ────────────────────────────────────── -->
+      <div id="pkgActionsPanel" style="display:none">
+        <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start">
+          <!-- Left: filter picker (optional) -->
+          <div class="card" style="margin-bottom:0">
+            <div class="card-header">
+              <span class="card-title">1. Filter by Installed Software</span>
+              <span style="margin-left:auto;font-size:9px;color:var(--text2);font-family:var(--mono)">optional</span>
+            </div>
+            <div class="card-body" style="padding:10px">
+              <button class="btn btn-ghost" id="invActShowAllBtn" onclick="invActClearFilter()"
+                style="width:100%;margin-bottom:8px;font-size:11px;border-color:var(--accent);color:var(--accent)">
+                ⊟ Show All Computers
+              </button>
+              <input id="invActSoftwareSearch" placeholder="Search software name or choco ID…"
+                oninput="renderInvActSoftwareList()"
+                style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:var(--radius);font-size:12px;font-family:var(--mono);outline:none;margin-bottom:8px">
+              <div id="invActSoftwareList"
+                style="max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg)">
+                <div class="empty" style="padding:12px">Loading…</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: computer list + target software + action bar -->
+          <div>
+            <div class="card" style="margin-bottom:12px">
+              <div class="card-header" style="gap:8px">
+                <span class="card-title">2. Select Computers</span>
+                <span id="invActFilterLabel" style="font-size:10px;color:var(--accent);font-family:var(--mono)"></span>
+                <span id="invActSelCount" style="font-size:10px;color:var(--text2);font-family:var(--mono)"></span>
+                                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectAll()">All</button>
+                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectOnline()">All Online</button>
+                <div style="margin-left:auto;display:flex;gap:6px">
+
+                  <button class="btn btn-ghost" style="font-size:10px" id="invActOutdatedBtn" onclick="invActSelectOutdated()">Outdated only</button>
+                  <label style="font-size:10px;color:var(--muted); display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="invActOnlineCheck" onchange="invActSelectOnlineCheck(this.checked)">Online only</label>
+<!--                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectOnlineCheck()">Online only</button>-->
+                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectInternetIP()">Internet only VLAN</button>
+                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectOfflineIP()">Offline only VLAN</button>
+                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectNone()">Clear</button>
+                </div>
+              </div>
+              <div style="overflow-x:auto;max-height:340px;overflow-y:auto">
+                <table id="invActComputerTable" style="width:100%;border-collapse:collapse;font-size:12px">
+                  <thead id="invActTableHead"><tr>
+                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;width:28px;position:sticky;top:0">
+                      <input type="checkbox" id="invActCheckAll" onchange="invActToggleAll(this.checked)" style="cursor:pointer">
+                    </th>
+                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Computer</th>
+                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Online</th>
+                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">IP Address</th>
+                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Installed</th>
+                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Latest</th>
+                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Status</th>
+                  </tr></thead>
+                  <tbody id="invActComputerBody">
+                    <tr><td colspan="7" class="empty" style="padding:20px;text-align:center">Loading computers…</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Target software picker -->
+            <div class="card" style="margin-bottom:12px">
+              <div class="card-header"><span class="card-title">3. Pick Software To Install / Upgrade / Uninstall</span></div>
+              <div class="card-body" style="padding:12px 16px">
+                <div class="sub-tabs" style="margin-bottom:10px">
+                  <button class="sub-tab active" id="invActSrcTabCommunity" onclick="invActSwitchSourceTab('community',this)">Community (Chocolatey)</button>
+                  <button class="sub-tab" id="invActSrcTabInternal" onclick="invActSwitchSourceTab('internal',this)">Internal Packages</button>
+                </div>
+
+                <!-- Community target -->
+                <div id="invActTargetCommunity">
+                  <div style="display:flex;gap:8px;margin-bottom:6px">
+                    <input id="invActTargetPkgId" placeholder="choco package id, e.g. vlc"
+                      style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px;font-family:var(--mono);outline:none">
+                    <input id="invActTargetPkgName" placeholder="Display name (optional)"
+                      style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px;outline:none">
+                    <input id="invActTargetPkgVersion" placeholder="Version (optional, e.g. 3.0.23)"
+                      style="width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:12px;font-family:var(--mono);outline:none">
+                  </div>
+                </div>
+
+                <!-- Internal target -->
+                <div id="invActTargetInternal" style="display:none">
+                  <div id="invActInternalPkgList" style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg)">
+                    <div class="empty" style="padding:10px">No internal packages</div>
+                  </div>
+                </div>
+
+                <div style="font-size:10px;color:var(--text2);font-family:var(--mono);margin-top:6px" id="invActTargetSummary">No target package selected</div>
+              </div>
+            </div>
+
+            <!-- Action bar -->
+            <div class="card" style="margin-bottom:0">
+              <div class="card-header"><span class="card-title">4. Dispatch</span></div>
+              <div class="card-body" style="padding:12px 16px">
+                <!-- Batch settings row -->
+                <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+                  <label style="font-size:11px;color:var(--text2);font-family:var(--mono)">
+                    Batch size:
+                    <input id="invActBatchSize" type="number" value="10" min="1" max="50"
+                      style="width:52px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;margin-left:4px">
+                  </label>
+                  <label style="font-size:11px;color:var(--text2);font-family:var(--mono)">
+                    Delay between batches (s):
+                    <input id="invActBatchDelay" type="number" value="90" min="0" max="600"
+                      style="width:58px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;margin-left:4px">
+                  </label>
+                  <label style="font-size:11px;color:var(--text2);font-family:var(--mono)">
+                    Install args (optional):
+                    <input id="invActInstallArgs" placeholder=""
+                      style="width:160px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;margin-left:4px">
+                  </label>
+                </div>
+                <!-- Choco actions -->
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+                  <button class="btn btn-primary" onclick="invActDispatch('install')">↓ Install</button>
+                  <button class="btn btn-ghost-accent" onclick="invActDispatch('upgrade')">↑ Upgrade</button>
+                  <button class="btn btn-danger" onclick="invActDispatch('uninstall')">✕ Uninstall</button>
+                  <div style="width:1px;background:var(--border);margin:0 4px"></div>
+                  <button class="btn btn-ghost" style="border-color:var(--accent2);color:var(--accent2)" onclick="invActOpenNotify()">✉ Send Notification</button>
+                  <button class="btn btn-ghost" style="border-color:var(--warn);color:var(--warn)" onclick="invActOpenRestart()">↺ Schedule Restart</button>
+                </div>
+                <div id="invActStatus" style="font-size:11px;font-family:var(--mono);color:var(--text2);min-height:16px"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Original Inventory table ───────────────────────────────────── -->
+      <div id="pkgInventoryPanel">
       <div class="pagination-row" style="margin-bottom:16px">
         <button onclick="refreshChocoVersions(this)" class="btn btn-ghost-accent" style="font-size:11px">↻ Refresh Choco Versions</button>
         <span id="chocoRefreshStatus" style="font-size:11px;color:var(--text2);font-family:var(--mono)"></span>
@@ -718,6 +859,7 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
         <table id="dataTable">
           <thead><tr>
             <th onclick="setSort('computer')">Computer</th>
+            <th onclick="setSort('ip_address')">IP Address</th>
             <th onclick="setSort('display_name')">Software</th>
             <th onclick="setSort('display_version')">Installed</th>
             <th onclick="setSort('env_latest')">Latest in Env</th>
@@ -730,6 +872,7 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
           <tbody id="tableBody"><tr><td colspan="9"><div class="loading"><div class="spinner"></div>Loading…</div></td></tr></tbody>
         </table>
       </div>
+      </div><!-- /pkgInventoryPanel -->
     </div>
 
     <!-- ── Deploy ─────────────────────────────────────────────────────────── -->
@@ -1450,7 +1593,7 @@ function updateSortIndicators() {
     th.classList.remove('sorted-asc', 'sorted-desc');
   });
   if (!sortState.column) return;
-  var map = { computer:0, display_name:1, display_version:2, env_latest:3, choco_latest:4, status:5, publisher:6, install_date:7 };
+  var map = { computer:0, ip_address:1, display_name:2, display_version:3, env_latest:4, choco_latest:5, status:6, publisher:7, install_date:8 };
   var th = document.querySelectorAll('#dataTable thead th')[map[sortState.column]];
   if (th) th.classList.add(sortState.direction === 'asc' ? 'sorted-asc' : 'sorted-desc');
 }
@@ -1466,6 +1609,7 @@ function switchDeployTab(tab, btn) {
 }
 
 function renderInternalPackageList() {
+  if (document.getElementById('invActInternalPkgList')) renderInvActInternalPkgList();
   var list = document.getElementById('internalPkgList');
   if (!allInternalPackages.length) {
     list.innerHTML = '<div class="empty">No internal packages yet</div>';
@@ -1816,6 +1960,7 @@ function updateDashboard() {
       var valA, valB;
       switch (sortState.column) {
         case 'computer':        valA = a.computer || '';     valB = b.computer || '';     break;
+        case 'ip_address':        valA = a.ip_address || '';     valB = b.ip_address || '';     break;
         case 'display_name':    valA = a.display_name || ''; valB = b.display_name || ''; break;
         case 'display_version': return sortState.direction === 'asc' ? compareVersions(a.display_version, b.display_version) : compareVersions(b.display_version, a.display_version);
         case 'env_latest':      return sortState.direction === 'asc' ? compareVersions(envLatestMap.get(a.display_name)||'', envLatestMap.get(b.display_name)||'') : compareVersions(envLatestMap.get(b.display_name)||'', envLatestMap.get(a.display_name)||'');
@@ -1921,6 +2066,7 @@ function renderTablePage() {
     var envLatest = envLatestMap.get(r.display_name) || '';
     tr.innerHTML =
       '<td><span class="computer-pill" style="cursor:pointer" onclick="openMachineDetail(' + JSON.stringify(r.computer || '') + ')">' + (r.computer || '') + '</span></td>' +
+      '<td style="color:var(--muted)">' + (r.ip_address || '') + '</td>' +
       '<td class="td-name" onclick="filterBySoftware(\'' + (r.display_name||'').replace(/'/g,"\\'") + '\')">' + (r.display_name || '') + '</td>' +
       '<td style="font-family:var(--mono);font-size:11px">' + (r.display_version || '') + '</td>' +
       '<td style="font-family:var(--mono);font-size:11px;color:var(--accent2)">' + (envLatest || '&#8212;') + '</td>' +
@@ -2065,6 +2211,17 @@ function renderJobHistory() {
         return function() { deleteJob(id); };
       })(job.id));
       outputCell.appendChild(delBtn);
+    }
+    // Retry button for failed/cancelled jobs
+    if (job.status === 'failed' || job.status === 'cancelled') {
+      var retryBtn = document.createElement('button');
+      retryBtn.className = 'job-cancel-btn';
+      retryBtn.textContent = '↺ Retry';
+      retryBtn.style.cssText = 'border-color:var(--accent2);color:var(--accent2)';
+      retryBtn.addEventListener('click', (function(id) {
+        return function() { retryJob(id); };
+      })(job.id));
+      outputCell.appendChild(retryBtn);
     }
     tbody.appendChild(tr);
   });
@@ -2246,7 +2403,7 @@ var allSoftwareSummary = {};  // pkg display_name -> {publishers, versions, comp
 
 function buildSoftwareSummary(data) {
   // Safety Guard
-    var summaryEl = document.getElementById('softwareSummaryTable'); // Use the actual ID
+    var summaryEl = document.getElementById('softwareListTable');
     if (!summaryEl) return;
   allSoftwareSummary = {};
   data.forEach(function(r) {
@@ -2275,7 +2432,7 @@ function buildSoftwareSummary(data) {
 }
 
 function renderSoftwareSummaryList() {
-var container = document.getElementById('allSoftwareSummary');//('softwareSummaryList'); // Or whatever ID your summary list uses
+var container = document.getElementById('softwareListTable');
 
     // IF THIS CONTAINER IS MISSING, THE FUNCTION EXITS SAFELY
     if (!container) {
@@ -2305,7 +2462,7 @@ var container = document.getElementById('allSoftwareSummary');//('softwareSummar
     return (a.display_name || '').localeCompare(b.display_name || '');
   });
 
-  document.getElementById('swListCount').textContent = entries.length + ' packages';
+  document.getElementById('chartBadge').textContent = entries.length + ' packages';
 
   if (!entries.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:16px">No packages found</td></tr>';
@@ -2368,7 +2525,10 @@ function showSwComputers(key, tr) {
   td.style.cssText = 'padding:0 10px 10px 24px;background:var(--bg)';
   td.innerHTML = computers.length
     ? computers.map(function(c) {
-        return '<span class="computer-pill" style="cursor:pointer;margin:2px" onclick="filterToComputer(' + JSON.stringify(c) + ')">' + c + '</span>';
+        var comp = allComputers.find(function(x){ return x.hostname === c; });
+        var ip   = comp && comp.ip_address ? comp.ip_address : null;
+        var label = c + (ip ? ' <span style="font-family:var(--mono);font-size:9px;opacity:0.7">(' + ip + ')</span>' : '');
+        return '<span class="computer-pill" style="cursor:pointer;margin:2px" onclick="filterToComputer(' + JSON.stringify(c) + ')">' + label + '</span>';
       }).join(' ')
     : '<span style="color:var(--muted);font-size:11px">No computers</span>';
   expandRow.appendChild(td);
@@ -2906,6 +3066,9 @@ function buildMachineJobTable(jobs, showCancel) {
       btn = '<button class="job-cancel-btn" onclick="cancelJob(\'' + job.id + '\');setTimeout(function(){loadMachineDetail(_currentMachine)},500)">Cancel</button>';
     } else if (!showCancel) {
       btn = '<button class="job-cancel-btn" onclick="deleteJob(\'' + job.id + '\');setTimeout(function(){loadMachineDetail(_currentMachine)},500)">Delete</button>';
+      if (job.status === 'failed' || job.status === 'cancelled') {
+        btn += '<button class="job-cancel-btn" style="border-color:var(--accent2);color:var(--accent2)" onclick="retryJob(\'' + job.id + '\')">↺ Retry</button>';
+      }
     }
     return '<tr>' +
       '<td style="font-family:var(--mono)">' + (job.display_name || job.package_id || '') + '</td>' +
@@ -3003,7 +3166,7 @@ async function executeCommand() {
   }
 
   if (cmdType === 'msi_guid_search') {
-    payloadAction = 'msi_guid_search';
+    payloadAction = 'run_msi_guid_search';
     payloadArgs   = cmdBody.trim();
   }
 
@@ -3023,10 +3186,10 @@ async function executeCommand() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         package_id:   payloadAction === 'msi_uninstall' ? 'msi_removal'
-                    : payloadAction === 'msi_guid_search' ? 'guid_search'
+                    : payloadAction === 'run_msi_guid_search' ? 'guid_search'
                     : 'system_command',
         display_name: payloadAction === 'msi_uninstall'   ? `Uninstall MSI (${payloadArgs})`
-                    : payloadAction === 'msi_guid_search' ? `GUID Search: ${payloadArgs}`
+                    : payloadAction === 'run_msi_guid_search' ? `GUID Search: ${payloadArgs}`
                     : payloadAction === 'run_cmd'         ? 'CMD Script'
                     : 'PowerShell Script',
         action:       payloadAction,
@@ -3052,6 +3215,431 @@ async function executeCommand() {
     statusEl.style.color = "var(--danger)";
   }
 }
+
+// ── Retry job ─────────────────────────────────────────────────────────────────
+async function retryJob(jobId) {
+  if (!confirm('Retry this job? A new pending job will be created.')) return;
+  try {
+    var res = await fetch('/api/jobs/' + jobId + '/retry', { method: 'POST' });
+    var data = await res.json();
+    if (res.ok) {
+      loadJobs();
+      if (_currentMachine) setTimeout(function(){ loadMachineDetail(_currentMachine); }, 400);
+    } else {
+      alert(data.error || 'Error retrying job');
+    }
+  } catch(e) { alert('Network error'); }
+}
+
+// ── Packages sub-tab switcher ─────────────────────────────────────────────────
+function switchPkgTab(tab, btn) {
+  document.querySelectorAll('#page-packages .sub-tab').forEach(function(b){
+    if (b.id === 'invActSrcTabCommunity' || b.id === 'invActSrcTabInternal') return; // skip nested sub-tabs
+    b.classList.remove('active');
+  });
+  btn.classList.add('active');
+  if (tab === 'actions') {
+    document.getElementById('pkgInventoryPanel').style.display = 'none';
+    document.getElementById('pkgActionsPanel').style.display = '';
+    renderInvActSoftwareList();
+    renderInvActComputerTable();   // shows all computers by default (no filter)
+    renderInvActInternalPkgList();
+  } else {
+    document.getElementById('pkgInventoryPanel').style.display = '';
+    document.getElementById('pkgActionsPanel').style.display = 'none';
+  }
+}
+
+// ── Inventory Actions state ───────────────────────────────────────────────────
+// invActFilterSoftware: software used only to FILTER which computers are shown (or null = all computers)
+// invActTargetPkg:      the package that will actually be installed/upgraded/uninstalled
+var invActFilterSoftware    = null;   // { display_name, choco_id, rows[] }
+var invActSelectedComputers = new Set();
+var invActTargetSourceTab   = 'community';   // 'community' | 'internal'
+var invActTargetInternalPkg = null;          // selected internal package object
+
+// ── Step 1: filter list ────────────────────────────────────────────────────
+function renderInvActSoftwareList() {
+  var search = (document.getElementById('invActSoftwareSearch').value || '').toLowerCase();
+  var list   = document.getElementById('invActSoftwareList');
+  list.innerHTML = '';
+
+  var map = {};
+  allInventory.forEach(function(r) {
+    var key = r.choco_id || r.display_name;
+    if (!key) return;
+    if (!map[key]) map[key] = { display_name: r.display_name, choco_id: r.choco_id, count: 0 };
+    map[key].count++;
+  });
+
+  var entries = Object.values(map).filter(function(e) {
+    var name = (e.display_name || '').toLowerCase();
+    var cid  = (e.choco_id || '').toLowerCase();
+    return name.includes(search) || cid.includes(search);
+  }).sort(function(a, b) { return (a.display_name || '').localeCompare(b.display_name || ''); });
+
+  if (!entries.length) {
+    list.innerHTML = '<div class="empty" style="padding:12px">No matches</div>';
+    return;
+  }
+
+  entries.forEach(function(e) {
+    var isSelected = invActFilterSoftware && (invActFilterSoftware.choco_id || invActFilterSoftware.display_name) === (e.choco_id || e.display_name);
+    var div = document.createElement('div');
+    div.className = 'drawer-item' + (isSelected ? ' selected' : '');
+    div.innerHTML =
+      '<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">' +
+        '<span class="item-name">' + (e.display_name || e.choco_id) + '</span>' +
+        (e.choco_id ? '<span style="font-size:9px;color:var(--muted);font-family:var(--mono)">' + e.choco_id + '</span>' : '') +
+      '</div>' +
+      '<span style="font-size:10px;color:var(--muted);font-family:var(--mono)">' + e.count + '</span>';
+    div.onclick = function() { invActSelectFilterSoftware(e); };
+    list.appendChild(div);
+  });
+}
+
+function invActSelectFilterSoftware(entry) {
+  var key = entry.choco_id || entry.display_name;
+  var rows = allInventory.filter(function(r) { return (r.choco_id || r.display_name) === key; });
+  invActFilterSoftware = { display_name: entry.display_name, choco_id: entry.choco_id, rows: rows };
+  invActSelectedComputers.clear();
+  renderInvActSoftwareList();
+  renderInvActComputerTable();
+}
+
+function invActClearFilter() {
+  invActFilterSoftware = null;
+  invActSelectedComputers.clear();
+  renderInvActSoftwareList();
+  renderInvActComputerTable();
+}
+
+// ── Step 2: computer table (filtered, or all computers if no filter) ───────
+function invActGetVisibleRows() {
+  if (invActFilterSoftware) return invActFilterSoftware.rows;
+  // No filter: synthesize one "row" per onboarded computer, no version info
+  return allComputers.map(function(c) {
+    return { computer: c.hostname, display_version: null, choco_latest: null };
+  });
+}
+
+function renderInvActComputerTable() {
+  var tbody     = document.getElementById('invActComputerBody');
+  var thead     = document.getElementById('invActTableHead');
+  var filterLbl = document.getElementById('invActFilterLabel');
+  var outdatedBtn = document.getElementById('invActOutdatedBtn');
+
+  if (invActFilterSoftware) {
+    filterLbl.textContent = 'Filtered: ' + (invActFilterSoftware.display_name || invActFilterSoftware.choco_id);
+    outdatedBtn.style.display = '';
+  } else {
+    filterLbl.textContent = 'All onboarded computers';
+    outdatedBtn.style.display = 'none';
+  }
+
+  var rows = invActGetVisibleRows();
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty" style="padding:20px;text-align:center">' +
+      (invActFilterSoftware ? 'No computers have this software' : 'No computers onboarded yet') + '</td></tr>';
+    updateInvActSelCount();
+    return;
+  }
+
+  tbody.innerHTML = '';
+  rows.sort(function(a, b) {
+    if (invActFilterSoftware) {
+      var aOut = a.choco_latest && a.choco_latest !== a.display_version;
+      var bOut = b.choco_latest && b.choco_latest !== b.display_version;
+      if (aOut !== bOut) return bOut ? 1 : -1;
+    }
+    return (a.computer || '').localeCompare(b.computer || '');
+  });
+
+  rows.forEach(function(r) {
+    var comp      = allComputers.find(function(c){ return c.hostname === r.computer; });
+    var isOnline  = comp && comp.status === 'online';
+    var isChecked = invActSelectedComputers.has(r.computer);
+    var isOutdated = invActFilterSoftware && r.choco_latest && r.choco_latest !== r.display_version;
+    var ipAddress = comp && comp.ip_address ? comp.ip_address : '—';
+
+    var statusHtml;
+    if (!invActFilterSoftware) {
+      statusHtml = '<span style="font-size:9px;color:var(--muted);font-family:var(--mono)">—</span>';
+    } else if (isOutdated) {
+      statusHtml = '<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(240,68,68,0.12);color:var(--danger);font-family:var(--mono)">Outdated</span>';
+    } else {
+      statusHtml = '<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(0,212,170,0.1);color:var(--accent);font-family:var(--mono)">OK</span>';
+    }
+
+    var onlineHtml = isOnline
+      ? '<span class="status-dot dot-online" style="display:inline-block"></span>'
+      : '<span class="status-dot dot-offline" style="display:inline-block"></span>';
+
+    var tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.innerHTML =
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' +
+        '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' style="cursor:pointer" data-host="' + r.computer + '">' +
+      '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px">' + (r.computer || '—') + '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' + onlineHtml + '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text2)">' + ipAddress + '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px">' + (r.display_version || '—') + '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--accent)">' + (r.choco_latest || '—') + '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' + statusHtml + '</td>';
+
+    tr.onclick = function(e) {
+      if (e.target.type === 'checkbox') return;
+      var cb = tr.querySelector('input[type=checkbox]');
+      cb.checked = !cb.checked;
+      invActToggleComputer(r.computer, cb.checked);
+    };
+    var cb = tr.querySelector('input[type=checkbox]');
+    cb.onchange = function() { invActToggleComputer(r.computer, this.checked); };
+    tbody.appendChild(tr);
+  });
+  updateInvActSelCount();
+}
+
+function invActToggleComputer(hostname, checked) {
+  if (checked) invActSelectedComputers.add(hostname);
+  else invActSelectedComputers.delete(hostname);
+  updateInvActSelCount();
+  var rows = invActGetVisibleRows();
+  var allChecked = rows.length > 0 && rows.every(function(r){ return invActSelectedComputers.has(r.computer); });
+  document.getElementById('invActCheckAll').checked = allChecked;
+}
+
+function invActToggleAll(checked) {
+  invActGetVisibleRows().forEach(function(r) {
+    if (checked) invActSelectedComputers.add(r.computer);
+    else invActSelectedComputers.delete(r.computer);
+  });
+  renderInvActComputerTable();
+}
+
+function invActSelectAll() {
+  invActGetVisibleRows().forEach(function(r){ invActSelectedComputers.add(r.computer); });
+  renderInvActComputerTable();
+}
+
+function invActSelectOutdated() {
+  if (!invActFilterSoftware) return;
+  invActSelectedComputers.clear();
+  invActFilterSoftware.rows.forEach(function(r){
+    if (r.choco_latest && r.choco_latest !== r.display_version) invActSelectedComputers.add(r.computer);
+  });
+  renderInvActComputerTable();
+}
+
+// --- Filter state ---
+var invActIpFilterMode = null; // null | 'internet' | 'offline'
+var invActOnlineOnly = false;
+
+// --- Core filter applier ---
+function invActApplyFilters() {
+  invActSelectedComputers.clear();
+  invActGetVisibleRows().forEach(function(r) {
+    var comp = allComputers.find(function(c){ return c.hostname === r.computer; });
+    if (!comp) return;
+
+    if (invActIpFilterMode === 'internet' && (!comp.ip_address || comp.ip_address.startsWith("172"))) return;
+    if (invActIpFilterMode === 'offline' && (!comp.ip_address || !comp.ip_address.startsWith("172"))) return;
+
+    if (invActOnlineOnly && comp.status !== 'online') return;
+
+    invActSelectedComputers.add(r.computer);
+  });
+  renderInvActComputerTable();
+  updateInvActSelCount();
+}
+
+// --- Buttons: set IP mode, then apply ---
+function invActSelectInternetIP() {
+  invActIpFilterMode = 'internet';
+  invActApplyFilters();
+}
+
+function invActSelectOfflineIP() {
+  invActIpFilterMode = 'offline';
+  invActApplyFilters();
+}
+
+// --- Standalone "Online" button ---
+function invActSelectOnline() {
+  invActIpFilterMode = null;
+  invActOnlineOnly = true;
+  invActApplyFilters();
+  var cb = document.getElementById('invActOnlineCheck');
+  if (cb) cb.checked = true; // keep checkbox visually in sync
+}
+
+// --- Checkbox handler ---
+function invActSelectOnlineCheck(checked) {
+  invActOnlineOnly = checked;
+  invActApplyFilters();
+}
+
+// --- Clear everything, including filter state ---
+function invActSelectNone() {
+  invActIpFilterMode = null;
+  invActOnlineOnly = false;
+  invActSelectedComputers.clear();
+  renderInvActComputerTable();
+  updateInvActSelCount();
+  var cb = document.getElementById('invActOnlineCheck');
+  if (cb) cb.checked = false; // keep checkbox visually in sync
+}
+
+function updateInvActSelCount() {
+  var total = invActGetVisibleRows().length;
+  var sel   = invActSelectedComputers.size;
+  document.getElementById('invActSelCount').textContent = sel ? sel + ' / ' + total + ' selected' : total + ' computers';
+}
+
+// ── Step 3: target package picker (separate from the filter!) ─────────────
+function invActSwitchSourceTab(tab, btn) {
+  invActTargetSourceTab = tab;
+  document.getElementById('invActSrcTabCommunity').classList.toggle('active', tab === 'community');
+  document.getElementById('invActSrcTabInternal').classList.toggle('active', tab === 'internal');
+  document.getElementById('invActTargetCommunity').style.display = tab === 'community' ? '' : 'none';
+  document.getElementById('invActTargetInternal').style.display  = tab === 'internal'  ? '' : 'none';
+  invActUpdateTargetSummary();
+}
+
+function renderInvActInternalPkgList() {
+  var list = document.getElementById('invActInternalPkgList');
+  if (!allInternalPackages.length) {
+    list.innerHTML = '<div class="empty" style="padding:10px">No internal packages — add some in the Deploy tab</div>';
+    return;
+  }
+  list.innerHTML = '';
+  allInternalPackages.forEach(function(pkg) {
+    var isSelected = invActTargetInternalPkg && invActTargetInternalPkg.id === pkg.id;
+    var div = document.createElement('div');
+    div.className = 'drawer-item' + (isSelected ? ' selected' : '');
+    div.innerHTML =
+      '<div style="display:flex;flex-direction:column;flex:1;overflow:hidden">' +
+        '<span class="item-name">' + (pkg.display_name || pkg.choco_id) + '</span>' +
+        '<span style="font-size:9px;color:var(--muted);font-family:var(--mono)">' + pkg.choco_id + '</span>' +
+      '</div>';
+    div.onclick = function() {
+      invActTargetInternalPkg = pkg;
+      renderInvActInternalPkgList();
+      invActUpdateTargetSummary();
+    };
+    list.appendChild(div);
+  });
+}
+
+document.getElementById('invActTargetPkgId').addEventListener('input', invActUpdateTargetSummary);
+document.getElementById('invActTargetPkgVersion').addEventListener('input', invActUpdateTargetSummary);
+
+function invActGetTargetPkg() {
+  if (invActTargetSourceTab === 'internal') {
+    if (!invActTargetInternalPkg) return null;
+    return {
+      choco_id:     invActTargetInternalPkg.choco_id,
+      display_name: invActTargetInternalPkg.display_name || invActTargetInternalPkg.choco_id,
+      version:      null,
+      source_url:   serverConfig.internal_source_url || null
+    };
+  }
+  var id = document.getElementById('invActTargetPkgId').value.trim().toLowerCase();
+  if (!id) return null;
+  return {
+    choco_id:     id,
+    display_name: document.getElementById('invActTargetPkgName').value.trim() || id,
+    version:      document.getElementById('invActTargetPkgVersion').value.trim() || null,
+    source_url:   null
+  };
+}
+
+function invActUpdateTargetSummary() {
+  var pkg = invActGetTargetPkg();
+  var el  = document.getElementById('invActTargetSummary');
+  if (!pkg) { el.textContent = 'No target package selected'; el.style.color = 'var(--text2)'; return; }
+  el.textContent = 'Target: ' + pkg.display_name + ' (' + pkg.choco_id + ')' + (pkg.version ? ' @ ' + pkg.version : ' — latest') +
+    (invActTargetSourceTab === 'internal' ? ' · internal repo' : ' · community Chocolatey');
+  el.style.color = 'var(--accent)';
+}
+
+// ── Step 4: dispatch ────────────────────────────────────────────────────────
+async function invActDispatch(action) {
+  var computers = Array.from(invActSelectedComputers);
+  if (!computers.length) { alert('Select at least one computer'); return; }
+
+  var pkg = invActGetTargetPkg();
+  if (!pkg) { alert('Pick a package to ' + action + ' first (step 3)'); return; }
+
+  var confirmMsg = action === 'uninstall'
+    ? 'Uninstall "' + pkg.display_name + '" from ' + computers.length + ' computer(s)?'
+    : (action === 'install' ? 'Install' : 'Upgrade') + ' "' + pkg.display_name + '"' +
+      (pkg.version ? ' (' + pkg.version + ')' : '') + ' on ' + computers.length + ' computer(s)?';
+  if (!confirm(confirmMsg)) return;
+
+  var batchSize    = parseInt(document.getElementById('invActBatchSize').value) || 10;
+  var batchDelay   = parseInt(document.getElementById('invActBatchDelay').value) || 90;
+  var installArgs  = document.getElementById('invActInstallArgs').value.trim() || null;
+
+  // Chocolatey pins an exact version via --version=, passed through package_params
+  var packageParams = pkg.version ? ('--version=' + pkg.version) : null;
+
+  var statusEl = document.getElementById('invActStatus');
+  statusEl.textContent = '⏳ Queuing…';
+  statusEl.style.color = 'var(--text2)';
+
+  try {
+    var res = await fetch('/api/jobs/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        package_id:     pkg.choco_id,
+        display_name:   pkg.display_name,
+        action:         action,
+        source_url:     pkg.source_url,
+        install_args:   installArgs,
+        package_params: packageParams,
+        computers:      computers,
+        batch_size:     batchSize,
+        batch_delay_seconds: batchDelay
+      })
+    });
+    var data = await res.json();
+    if (res.ok) {
+      statusEl.textContent = '🚀 Queued ' + data.queued + ' job(s)' + (data.skipped && data.skipped.length ? ' (' + data.skipped.length + ' skipped)' : '');
+      statusEl.style.color = 'var(--accent)';
+      loadJobs();
+    } else {
+      statusEl.textContent = '❌ ' + (data.error || 'Failed');
+      statusEl.style.color = 'var(--danger)';
+    }
+  } catch(e) {
+    statusEl.textContent = '❌ Network error';
+    statusEl.style.color = 'var(--danger)';
+  }
+}
+
+function invActOpenNotify() {
+  if (!invActSelectedComputers.size) { alert('Select at least one computer first'); return; }
+  var computers = Array.from(invActSelectedComputers);
+  showPage('notifications', document.getElementById('tab-notifications'));
+  switchNotifyTab('message', document.querySelector('#page-notifications .sub-tab'));
+  notifySelectedComputers.clear();
+  computers.forEach(function(h){ notifySelectedComputers.add(h); });
+  renderNotifyComputerList('notifyComputerList', notifySelectedComputers);
+}
+
+function invActOpenRestart() {
+  if (!invActSelectedComputers.size) { alert('Select at least one computer first'); return; }
+  var computers = Array.from(invActSelectedComputers);
+  showPage('notifications', document.getElementById('tab-notifications'));
+  switchNotifyTab('restart', document.querySelectorAll('#page-notifications .sub-tab')[1]);
+  restartSelectedComputers.clear();
+  computers.forEach(function(h){ restartSelectedComputers.add(h); });
+  renderNotifyComputerList('restartComputerList', restartSelectedComputers);
+}
+
 
 </script>
 </body>

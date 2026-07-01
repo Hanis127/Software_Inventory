@@ -180,3 +180,24 @@ def update_job(job_id):
         WHERE id = %s
     """, (data['status'], data.get('output', ''), job_id))
     return jsonify({'ok': True})
+
+@jobs_bp.route('/api/jobs/<job_id>/retry', methods=['POST'])
+@login_required
+def retry_job(job_id):
+    """Create a fresh copy of a failed/cancelled job and queue it immediately."""
+    row = query("""
+        SELECT j.*, c.hostname FROM jobs j
+        JOIN computers c ON c.id = j.computer_id
+        WHERE j.id = %s
+    """, (job_id,), fetch='one')
+    if not row:
+        return jsonify({'error': 'Job not found'}), 404
+    if row['status'] not in ('failed', 'cancelled'):
+        return jsonify({'error': 'Only failed or cancelled jobs can be retried'}), 400
+    result = query("""
+        INSERT INTO jobs (computer_id, package_id, display_name, status, action,
+                          source_url, install_args, package_params)
+        VALUES (%s, %s, %s, 'pending', %s, %s, %s, %s) RETURNING id
+    """, (row['computer_id'], row['package_id'], row['display_name'], row['action'],
+          row['source_url'], row['install_args'], row['package_params']), fetch='one')
+    return jsonify({'ok': True, 'job_id': str(result['id'])})
