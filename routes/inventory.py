@@ -274,9 +274,11 @@ def refresh_choco_versions_endpoint():
     """, fetch='all')
     choco_ids = [r['choco_id'] for r in rows]
 
+    internal_url = get_internal_source_url()  # fetch once, pass to all calls
+
     updated = 0
     for cid in choco_ids:
-        latest = fetch_choco_latest(cid)
+        latest = fetch_choco_latest(cid, internal_url)
         if latest:
             query("""
                 INSERT INTO choco_versions (choco_id, latest_version, checked_at)
