@@ -186,7 +186,9 @@ def refresh_stale_choco_versions(choco_ids, max_age_hours=CHOCO_REFRESH_HOURS):
 
 
 def fetch_choco_latest(package_id, internal_url=None):
-    # ─── STEP 1: INTERROGATE INTERNAL REPOSITORY FIRST ───
+    candidates = []
+
+    # ─── STEP 1: INTERNAL REPOSITORY ─────────────────────────────────────────
     if internal_url:
         internal_url_str = str(internal_url).strip()
 
@@ -199,7 +201,7 @@ def fetch_choco_latest(package_id, internal_url=None):
                     latest_internal = parse_versions_from_xml(r.text, package_id)
                     if latest_internal:
                         print(f"DEBUG: Found internal web version for {package_id}: {latest_internal}")
-                        return latest_internal
+                        candidates.append(latest_internal)
             except Exception as e:
                 print(f"Warning: Failed to scan internal web repo for {package_id}: {e}")
 
@@ -207,27 +209,34 @@ def fetch_choco_latest(package_id, internal_url=None):
         else:
             try:
                 if os.path.exists(internal_url_str):
-                    files = os.listdir(internal_url_str)
-
-                    # Local choco packages are named flatly: 'package_id.version.nupkg'
-                    # e.g., 'sqlserver-odbcdriver-18.18.6.2.1.nupkg'
-                    pattern = rf"^{re.escape(package_id)}\.(.+)\.nupkg$"
                     share_versions = []
 
-                    for f in files:
-                        match = re.match(pattern, f, re.IGNORECASE)
-                        if match:
-                            share_versions.append(match.group(1))
+                    # Search recursively for package files
+                    for root, dirs, files in os.walk(internal_url_str):
+                        for file in files:
+                            pattern = rf"^{re.escape(package_id)}\.(.+)\.nupkg$"
+                            match = re.match(pattern, file, re.IGNORECASE)
+
+                            if match:
+                                version = match.group(1)
+                                share_versions.append(version)
+                                print(f"DEBUG: Found package: {os.path.join(root, file)}")
+                                print(f"DEBUG: Version: {version}")
 
                     if share_versions:
                         share_versions.sort(
                             key=lambda v: [int(x) for x in re.sub(r'[^0-9.]', '', v).split('.') if x],
                             reverse=True
                         )
+
                         print(f"DEBUG: Found local share version for {package_id}: {share_versions[0]}")
-                        return share_versions[0]
+                        candidates.append(share_versions[0])
+                    else:
+                        print(f"DEBUG: No package named '{package_id}' found in {internal_url_str}")
+
                 else:
                     print(f"Warning: Internal share path does not exist or is inaccessible: {internal_url_str}")
+
             except Exception as e:
                 print(f"Warning: Failed to read internal file share {internal_url_str}: {e}")
 
@@ -236,15 +245,24 @@ def fetch_choco_latest(package_id, internal_url=None):
         url = f"{CHOCO_API}/FindPackagesById()?id='{package_id}'&semVerLevel=2.0.0"
         r = requests.get(url, timeout=10)
         r.raise_for_status()
-
         latest_public = parse_versions_from_xml(r.text, package_id)
         if latest_public:
             print(f"DEBUG: Found public version for {package_id}: {latest_public}")
-            return latest_public
+            candidates.append(latest_public)
     except Exception as e:
         print(f"Error fetching {package_id} from public Choco: {e}")
 
-    return None
+    # ─── STEP 3: RETURN HIGHEST VERSION ACROSS ALL SOURCES ───────────────────
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda v: [int(x) for x in re.sub(r'[^0-9.]', '', v).split('.') if x],
+        reverse=True
+    )
+    winner = candidates[0]
+    print(f"DEBUG: Best version for {package_id} across all sources: {winner} (from {len(candidates)} source(s))")
+    return winner
 
 
 @inventory_bp.route("/api/choco/refresh", methods=["POST"])
