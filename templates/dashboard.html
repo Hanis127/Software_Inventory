@@ -755,7 +755,6 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
                     <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;width:28px;position:sticky;top:0">
                       <input type="checkbox" id="invActCheckAll" onchange="invActToggleAll(this.checked)" style="cursor:pointer">
                     </th>
-                    <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Computer</th>
                     <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Online</th>
                     <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">IP Address</th>
                     <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Installed</th>
@@ -763,7 +762,7 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
                     <th style="padding:6px 10px;background:var(--bg);color:var(--text2);font-family:var(--mono);font-size:9px;text-transform:uppercase;letter-spacing:0.1em;border-bottom:1px solid var(--border);text-align:left;position:sticky;top:0">Status</th>
                   </tr></thead>
                   <tbody id="invActComputerBody">
-                    <tr><td colspan="7" class="empty" style="padding:20px;text-align:center">Loading computers…</td></tr>
+                    <tr><td colspan="6" class="empty" style="padding:20px;text-align:center">Loading computers…</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -1056,8 +1055,8 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
               <select id="cmdType">
                 <option value="run_cmd">Command Prompt (cmd.exe)</option>
                 <option value="run_powershell">PowerShell</option>
-                <option value="msi_uninstall">MSI Uninstall (enter GUID)</option>
-                <option value="msi_guid_search">MSI GUID Search (enter app name)</option>
+                <option value="run_msi_uninstall">MSI Uninstall (enter GUID)</option>
+                <option value="run_msi_guid_search">MSI GUID Search (enter app name)</option>
               </select>
             </div>
             <div class="form-field">
@@ -2063,9 +2062,13 @@ function renderTablePage() {
       }
     }
 
-    var envLatest = envLatestMap.get(r.display_name) || '';
+   var envLatest = envLatestMap.get(r.display_name) || '';
+    var compObj   = allComputers.find(function(c){ return c.hostname === r.computer; });
+    var onlineDot = compObj
+      ? '<span class="status-dot ' + (compObj.status === 'online' ? 'dot-online' : 'dot-offline') + '" style="display:inline-block;margin-right:5px;vertical-align:middle"></span>'
+      : '';
     tr.innerHTML =
-      '<td><span class="computer-pill" style="cursor:pointer" onclick="openMachineDetail(' + JSON.stringify(r.computer || '') + ')">' + (r.computer || '') + '</span></td>' +
+      '<td style="white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:5px">' + onlineDot + '<span class="computer-pill" style="cursor:pointer" onclick="openMachineDetail(' + JSON.stringify(r.computer || '') + ')">' + (r.computer || '') + '</span></span></td>' +
       '<td style="color:var(--muted)">' + (r.ip_address || '') + '</td>' +
       '<td class="td-name" onclick="filterBySoftware(\'' + (r.display_name||'').replace(/'/g,"\\'") + '\')">' + (r.display_name || '') + '</td>' +
       '<td style="font-family:var(--mono);font-size:11px">' + (r.display_version || '') + '</td>' +
@@ -3153,8 +3156,8 @@ async function executeCommand() {
   let payloadAction = cmdType;
   let payloadArgs   = cmdBody;
 
-  if (cmdType === 'msi_uninstall') {
-    payloadAction = 'msi_uninstall';
+  if (cmdType === 'run_msi_uninstall') {
+    payloadAction = 'run_msi_uninstall';
     let bareGuid = cmdBody.replace(/[{}"']/g, '').trim().toUpperCase();
     const guidPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/;
     if (!guidPattern.test(bareGuid)) {
@@ -3165,7 +3168,7 @@ async function executeCommand() {
     payloadArgs = `{${bareGuid}}`;
   }
 
-  if (cmdType === 'msi_guid_search') {
+  if (cmdType === 'run_msi_guid_search') {
     payloadAction = 'run_msi_guid_search';
     payloadArgs   = cmdBody.trim();
   }
@@ -3185,10 +3188,10 @@ async function executeCommand() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        package_id:   payloadAction === 'msi_uninstall' ? 'msi_removal'
+        package_id:   payloadAction === 'run_msi_uninstall' ? 'msi_removal'
                     : payloadAction === 'run_msi_guid_search' ? 'guid_search'
                     : 'system_command',
-        display_name: payloadAction === 'msi_uninstall'   ? `Uninstall MSI (${payloadArgs})`
+        display_name: payloadAction === 'run_msi_uninstall'   ? `Uninstall MSI (${payloadArgs})`
                     : payloadAction === 'run_msi_guid_search' ? `GUID Search: ${payloadArgs}`
                     : payloadAction === 'run_cmd'         ? 'CMD Script'
                     : 'PowerShell Script',
@@ -3381,12 +3384,14 @@ function renderInvActComputerTable() {
       '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' +
         '<input type="checkbox" ' + (isChecked ? 'checked' : '') + ' style="cursor:pointer" data-host="' + r.computer + '">' +
       '</td>' +
-      '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px">' + (r.computer || '—') + '</td>' +
-      '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' + onlineHtml + '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;white-space:nowrap">' +
+      '<span style="display:inline-flex;align-items:center;gap:5px">' + onlineHtml + (r.computer || '—') + '</span>' +
+      '</td>' +
       '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text2)">' + ipAddress + '</td>' +
       '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px">' + (r.display_version || '—') + '</td>' +
       '<td style="padding:5px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--accent)">' + (r.choco_latest || '—') + '</td>' +
-      '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' + statusHtml + '</td>';
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' + statusHtml + '</td>' +
+      '<td style="padding:5px 10px;border-bottom:1px solid var(--border)">' + onlineHtml + '</td>';
 
     tr.onclick = function(e) {
       if (e.target.type === 'checkbox') return;
