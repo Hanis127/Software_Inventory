@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.06.10"
+AGENT_VERSION = "2026.06.13"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -592,7 +592,7 @@ def run_msi_guid_search(script_text):
             f"'HKLM:\\SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'); "
             f"Get-ChildItem -Path $paths -ErrorAction SilentlyContinue | Get-ItemProperty | "
             f"Where-Object {{ $_.DisplayName -like '*{script_text}*' }} | "
-            f"Select-Object -ExpandProperty PSChildName"
+            f"Select-Object PSChildName, DisplayName"
         )
 
         res = subprocess.run([
@@ -680,7 +680,7 @@ def poll_jobs():
                 continue
 
             # Administrative tool interceptor — run_cmd, run_powershell, run_msi_guid_search, msi_uninstall, agent_update
-            if action in ('run_cmd', 'run_powershell', 'run_msi_guid_search', 'msi_uninstall', 'agent_update'):
+            if action in ('run_cmd', 'run_powershell', 'run_msi_guid_search', 'run_msi_uninstall', 'agent_update'):
                 log(f"Job received (Admin Task): {action}")
                 api_patch(f"/api/jobs/{job['id']}", {"status": "running", "output": "Executing command payload..."})
 
@@ -692,7 +692,7 @@ def poll_jobs():
                     success, output = run_powershell_script(payload)
                 elif action == 'run_msi_guid_search':
                     success, output = run_msi_guid_search(payload)
-                elif action == 'msi_uninstall':
+                elif action == 'run_msi_uninstall':
                     success, output = run_msi_uninstall(payload)
                 elif action == 'agent_update':
                     success, output = run_agent_update()
