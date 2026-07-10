@@ -737,10 +737,9 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
                 <span class="card-title">2. Select Computers</span>
                 <span id="invActFilterLabel" style="font-size:10px;color:var(--accent);font-family:var(--mono)"></span>
                 <span id="invActSelCount" style="font-size:10px;color:var(--text2);font-family:var(--mono)"></span>
-                                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectAll()">All</button>
+                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectAll()">All</button>
                   <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectOnline()">All Online</button>
                 <div style="margin-left:auto;display:flex;gap:6px">
-
                   <button class="btn btn-ghost" style="font-size:10px" id="invActOutdatedBtn" onclick="invActSelectOutdated()">Outdated only</button>
                   <label style="font-size:10px;color:var(--muted); display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="invActOnlineCheck" onchange="invActSelectOnlineCheck(this.checked)">Online only</label>
 <!--                  <button class="btn btn-ghost" style="font-size:10px" onclick="invActSelectOnlineCheck()">Online only</button>-->
@@ -2062,7 +2061,7 @@ function renderTablePage() {
       }
     }
 
-   var envLatest = envLatestMap.get(r.display_name) || '';
+    var envLatest = envLatestMap.get(r.display_name) || '';
     var compObj   = allComputers.find(function(c){ return c.hostname === r.computer; });
     var onlineDot = compObj
       ? '<span class="status-dot ' + (compObj.status === 'online' ? 'dot-online' : 'dot-offline') + '" style="display:inline-block;margin-right:5px;vertical-align:middle"></span>'
@@ -2428,7 +2427,7 @@ function buildSoftwareSummary(data) {
     if (r.publisher) entry.publishers.add(r.publisher);
     if (r.display_version) entry.versions.add(r.display_version);
     if (r.computer) entry.computers.add(r.computer);
-    if (r.choco_latest && r.choco_latest !== r.display_version) entry.outdated = true;
+    if (r.choco_latest && r.display_version && compareVersions(r.display_version, r.choco_latest) < 0) entry.outdated = true;
     if (!r.choco_id) entry.unknown = true;
     if (r.choco_latest) entry.latest = r.choco_latest;
   });
@@ -3351,8 +3350,8 @@ function renderInvActComputerTable() {
   tbody.innerHTML = '';
   rows.sort(function(a, b) {
     if (invActFilterSoftware) {
-      var aOut = a.choco_latest && a.choco_latest !== a.display_version;
-      var bOut = b.choco_latest && b.choco_latest !== b.display_version;
+      var aOut = a.choco_latest && a.display_version && compareVersions(a.display_version, a.choco_latest) < 0;
+      var bOut = b.choco_latest && b.display_version && compareVersions(b.display_version, b.choco_latest) < 0;
       if (aOut !== bOut) return bOut ? 1 : -1;
     }
     return (a.computer || '').localeCompare(b.computer || '');
@@ -3362,7 +3361,7 @@ function renderInvActComputerTable() {
     var comp      = allComputers.find(function(c){ return c.hostname === r.computer; });
     var isOnline  = comp && comp.status === 'online';
     var isChecked = invActSelectedComputers.has(r.computer);
-    var isOutdated = invActFilterSoftware && r.choco_latest && r.choco_latest !== r.display_version;
+    var isOutdated = invActFilterSoftware && r.choco_latest && r.display_version && compareVersions(r.display_version, r.choco_latest) < 0;
     var ipAddress = comp && comp.ip_address ? comp.ip_address : '—';
 
     var statusHtml;
@@ -3432,7 +3431,7 @@ function invActSelectOutdated() {
   if (!invActFilterSoftware) return;
   invActSelectedComputers.clear();
   invActFilterSoftware.rows.forEach(function(r){
-    if (r.choco_latest && r.choco_latest !== r.display_version) invActSelectedComputers.add(r.computer);
+    if (r.choco_latest && r.display_version && compareVersions(r.display_version, r.choco_latest) < 0) invActSelectedComputers.add(r.computer);
   });
   renderInvActComputerTable();
 }
