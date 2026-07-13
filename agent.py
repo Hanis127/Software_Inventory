@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.06.13"
+AGENT_VERSION = "2026.06.17"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -439,7 +439,8 @@ def collect_and_send(internal_source=None):
 
     for pkg in software:
         pkg["choco_id"] = match_choco_id(pkg["display_name"], extended_choco_map, nuspec_titles)
-        if pkg["choco_id"]:
+        if pkg["choco_id"] and pkg["choco_id"] in choco_map:
+            pkg["choco_version"] = choco_map[pkg["choco_id"]]
             already_matched.add(pkg["choco_id"])
 
     for choco_id, installed_ver in choco_map.items():
@@ -502,10 +503,13 @@ def validate_source_url(url):
     return bool(VALID_SOURCE.match(normalize_unc(url)))
 
 def run_upgrade(package_id, source_url=None, install_args=None, package_params=None):
-    # For upgrades, always include the community feed alongside any internal source.
     try:
         if source_url:
-            combined = f"{source_url};https://community.chocolatey.org/api/v2/"
+            # Use root of share for combined source (Chocolatey searches subfolders)
+            # Strip the package subfolder that was appended by the dashboard
+            import re
+            root_url = re.sub(r'\\[^\\]+$', '', source_url) if source_url.startswith('\\\\') else source_url
+            combined = f"{root_url};https://community.chocolatey.org/api/v2/"
             log(f"Running: choco upgrade {package_id} --source <internal+community>")
             cmd = ["choco", "upgrade", package_id, "-y", "--no-progress",
                    "--source", combined]
@@ -674,6 +678,7 @@ def poll_jobs():
             action     = job.get('action', 'upgrade')
             package_id = job.get('package_id', '')
             source_url = normalize_unc(job.get('source_url'))
+            log(f"DEBUG source_url raw={repr(job.get('source_url'))} normalized={repr(source_url)} valid={validate_source_url(source_url)}")
 
             # Notification/restart jobs are handled by poll_notifications, not choco
             if action in ('notify', 'scheduled_restart'):
@@ -1005,7 +1010,7 @@ def main():
     if should_rotate():
         rotate_token()
 
-    time.sleep(random.uniform(0, 300))
+    # time.sleep(random.uniform(0, 300)) / I think sleep is unnecessary after adding the waitress
 
     while True:
         now = time.time()
