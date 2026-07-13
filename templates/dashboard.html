@@ -1724,7 +1724,10 @@ async function runDeploy(action) {
   if (!deploySelectedPkg || deploySelectedComputers.size === 0) return;
 
   var computers   = Array.from(deploySelectedComputers);
-  var sourceUrl   = action === 'uninstall' ? null : (serverConfig.internal_source_url || null);
+  var sourceUrl   = action === 'uninstall' ? null
+    : (serverConfig.internal_source_url
+        ? serverConfig.internal_source_url.replace(/[\\\/]+$/, '') + '\\' + deploySelectedPkg.choco_id
+        : null);
   var confirmMsg  = action === 'uninstall'
     ? 'Uninstall "' + deploySelectedPkg.display_name + '" from ' + computers.length + ' computer(s)?'
     : (action === 'install' ? 'Install' : 'Update') + ' "' + deploySelectedPkg.display_name + '" on ' + computers.length + ' computer(s)?';
@@ -3542,11 +3545,15 @@ document.getElementById('invActTargetPkgVersion').addEventListener('input', invA
 function invActGetTargetPkg() {
   if (invActTargetSourceTab === 'internal') {
     if (!invActTargetInternalPkg) return null;
+    var baseUrl = serverConfig.internal_source_url || null;
+    var sourceUrl = baseUrl
+      ? baseUrl.replace(/[\\\/]+$/, '') + '\\' + invActTargetInternalPkg.choco_id
+      : null;
     return {
       choco_id:     invActTargetInternalPkg.choco_id,
       display_name: invActTargetInternalPkg.display_name || invActTargetInternalPkg.choco_id,
       version:      null,
-      source_url:   serverConfig.internal_source_url || null
+      source_url:   sourceUrl
     };
   }
   var id = document.getElementById('invActTargetPkgId').value.trim().toLowerCase();
