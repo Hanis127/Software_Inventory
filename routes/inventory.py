@@ -16,11 +16,12 @@ CHOCO_REFRESH_HOURS = 1   # how long a cached "latest version" is considered fre
 def receive_inventory():
     """Agent posts inventory here every ~10 minutes."""
     data          = request.json
-    hostname      = data.get("hostname")
-    ip            = data.get("ip_address")
-    os_ver        = data.get("os_version")
-    agent_version = data.get("agent_version")
-    software      = data.get("software", [])
+    hostname       = data.get("hostname")
+    ip             = data.get("ip_address")
+    os_ver         = data.get("os_version")
+    agent_version  = data.get("agent_version")
+    last_boot_time = data.get("last_boot_time")
+    software       = data.get("software", [])
 
     conn = None
     try:
@@ -29,16 +30,17 @@ def receive_inventory():
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 # Upsert computer
                 cur.execute("""
-                    INSERT INTO computers (hostname, ip_address, os_version, last_seen, status, agent_version)
-                    VALUES (%s, %s, %s, NOW(), 'online', %s)
+                    INSERT INTO computers (hostname, ip_address, os_version, last_seen, status, agent_version, last_boot_time)
+                    VALUES (%s, %s, %s, NOW(), 'online', %s, %s)
                     ON CONFLICT (hostname) DO UPDATE SET
-                        ip_address   = EXCLUDED.ip_address,
-                        os_version   = EXCLUDED.os_version,
-                        last_seen    = NOW(),
-                        status       = 'online',
-                        agent_version = EXCLUDED.agent_version
+                        ip_address    = EXCLUDED.ip_address,
+                        os_version    = EXCLUDED.os_version,
+                        last_seen     = NOW(),
+                        status        = 'online',
+                        agent_version = EXCLUDED.agent_version,
+                        last_boot_time = COALESCE(EXCLUDED.last_boot_time, computers.last_boot_time)
                     RETURNING id
-                """, (hostname, ip, os_ver, agent_version))
+                """, (hostname, ip, os_ver, agent_version, last_boot_time))
                 computer_id = cur.fetchone()["id"]
 
                 # Replace software for this machine

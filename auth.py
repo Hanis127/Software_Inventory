@@ -183,7 +183,7 @@ def rotate_key():
 @login_required
 def list_agents():
     rows = query("""
-        SELECT hostname, agent_token_hint, enrolled_at, token_last_seen, revoked, agent_version
+        SELECT hostname, agent_token_hint, enrolled_at, token_last_seen, revoked, agent_version, last_boot_time
         FROM computers
         WHERE agent_token_hash IS NOT NULL
         ORDER BY hostname

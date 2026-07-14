@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.06.17"
+AGENT_VERSION = "2026.07.08"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -250,6 +250,25 @@ def get_ip():
     except Exception:
         return "Unknown"
 
+def get_last_boot_time():
+    """Returns the OS last boot time as an ISO-8601 UTC string, or None on failure.
+    Uses WMI LastBootUpTime rather than GetTickCount64 so that sleep/hibernate
+    doesn't make the machine look freshly rebooted."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-Command",
+             "$os = Get-WmiObject Win32_OperatingSystem; "
+             "$os.ConvertToDateTime($os.LastBootUpTime).ToUniversalTime().ToString('o')"],
+            capture_output=True, text=True, timeout=10,
+            encoding='utf-8', errors='replace',
+            creationflags=0x08000000
+        )
+        value = result.stdout.strip()
+        return value if value else None
+    except Exception as e:
+        log(f"Failed to get last boot time: {e}")
+        return None
+
 def get_registry_software():
     software = {}
     reg_paths = [
@@ -419,6 +438,7 @@ def collect_and_send(internal_source=None):
     hostname       = socket.gethostname()
     ip             = get_ip()
     os_ver         = get_os_version()
+    last_boot_time = get_last_boot_time()
     software       = get_registry_software()
     choco_map      = get_choco_packages()
     nuspec_titles  = get_nuspec_titles()
@@ -458,11 +478,12 @@ def collect_and_send(internal_source=None):
     log(f"Found {len(software)} packages, {matched} matched to Chocolatey")
 
     payload = {
-        "hostname":      hostname,
-        "ip_address":    ip,
-        "os_version":    os_ver,
-        "agent_version": AGENT_VERSION,
-        "software":      software
+        "hostname":       hostname,
+        "ip_address":     ip,
+        "os_version":     os_ver,
+        "agent_version":  AGENT_VERSION,
+        "last_boot_time": last_boot_time,
+        "software":       software
     }
 
     try:

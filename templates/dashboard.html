@@ -1460,6 +1460,19 @@ function formatLastSeen(timestamp) {
   return diffDays + 'd ago';
 }
 
+function formatUptime(lastBootTime) {
+  if (!lastBootTime) return 'Unknown';
+  var boot        = new Date(lastBootTime);
+  var diffSeconds = Math.floor((new Date() - boot) / 1000);
+  if (isNaN(diffSeconds) || diffSeconds < 0) return 'Unknown';
+  var days  = Math.floor(diffSeconds / 86400);
+  var hours = Math.floor((diffSeconds % 86400) / 3600);
+  var mins  = Math.floor((diffSeconds % 3600) / 60);
+  if (days  > 0) return days + 'd ' + hours + 'h';
+  if (hours > 0) return hours + 'h ' + mins + 'm';
+  return mins + 'm';
+}
+
 function buildEnvLatestMap() {
   envLatestMap.clear();
   allInventory.forEach(function(r) {
@@ -2631,10 +2644,14 @@ async function loadAgents() {
     var outdatedBadge = isOutdated
       ? ' <span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(245,158,11,0.15);color:var(--warn);border:1px solid rgba(245,158,11,0.3)">&#9888; outdated</span>'
       : '';
-    info.innerHTML =
-      '<div style="font-family:var(--mono);font-size:13px;' + (a.revoked ? 'color:var(--muted);text-decoration:line-through' : '') + '">' + a.hostname + hint + '</div>' +
-      // '<div style="font-size:10px;color:var(--muted);margin-top:2px">enrolled: ' + enrolled + ' &nbsp;·&nbsp; agent version: ' + agentVersion + outdatedBadge + ' &nbsp;·&nbsp; last seen: ' + lastSeen + (a.revoked ? ' &nbsp;·&nbsp; <span style="color:var(--danger)">REVOKED</span>' : '') + '</div>';
-      '<div style="font-size:10px;color:var(--muted);margin-top:2px">enrolled: ' + enrolled + ' &nbsp;·&nbsp; <span style="color:var(--accent)"> agent version: ' + agentVersion + outdatedBadge + ' </span>&nbsp;·&nbsp; last seen: ' + lastSeen + (a.revoked ? ' &nbsp;·&nbsp; <span style="color:var(--danger)">REVOKED</span>' : '') + '</div>';
+    var uptime = a.last_boot_time
+      ? ' &nbsp;·&nbsp; uptime: ' + formatUptime(a.last_boot_time)
+      : '';
+
+info.innerHTML =
+  '<div style="font-family:var(--mono);font-size:13px;' + (a.revoked ? 'color:var(--muted);text-decoration:line-through' : '') + '">' + a.hostname + hint + '</div>' +
+  '<div style="font-size:10px;color:var(--muted);margin-top:2px">enrolled: ' + enrolled + ' &nbsp;·&nbsp; <span style="color:var(--accent)"> agent version: ' + agentVersion + outdatedBadge + ' </span>&nbsp;·&nbsp; last seen: ' + lastSeen + (a.revoked ? ' &nbsp;·&nbsp; <span style="color:var(--danger)">REVOKED</span>' : '') + ' &nbsp;·&nbsp; uptime: ' + uptime + '</div>';
+
 
           var btn = document.createElement('button');
     if (a.revoked) {
@@ -2974,7 +2991,8 @@ async function loadMachineDetail(hostname) {
       (computer.ip_address || '') +
       (computer.os_version ? '  ·  ' + computer.os_version : '') +
       '  ·  ' + (computer.status === 'online' ? 'Online' : 'Offline') +
-      '  ·  Last seen: ' + formatLastSeen(computer.last_seen);
+      '  ·  Last seen: ' + formatLastSeen(computer.last_seen) +
+      (computer.last_boot_time ? '  ·  Uptime: ' + formatUptime(computer.last_boot_time) : '');
   }
 }
 
@@ -2988,6 +3006,7 @@ function renderMachineMeta(computer) {
                      ? '<span style="color:var(--online)">Online</span>'
                      : '<span style="color:var(--offline)">Offline</span>'],
     ['Last Seen',  formatLastSeen(computer.last_seen)],
+    ['Uptime',     formatUptime(computer.last_boot_time)],
     ['Enrolled',   computer.enrolled_at ? new Date(computer.enrolled_at).toLocaleDateString() : '—'],
   ];
   grid.innerHTML = items.map(function(item) {

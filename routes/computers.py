@@ -11,7 +11,7 @@ def get_computers():
     rows = query("""
         SELECT 
             id, hostname, ip_address, os_version,
-            last_seen,
+            last_seen, last_boot_time,
             CASE 
                 WHEN last_seen > NOW() - INTERVAL '%s minutes' THEN 'online'
                 ELSE 'offline'
