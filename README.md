@@ -1,39 +1,45 @@
 # Software Inventory & Patch Manager
 
-A lightweight Windows software inventory and patch management tool built with Flask, PostgreSQL, and a Windows agent. The server provides a web dashboard for monitoring installed software across machines and dispatching Chocolatey-based install/upgrade/uninstall jobs. The agent runs as a Windows service on each managed machine, collects inventory, and executes jobs posted by the dashboard.
+A lightweight Windows software inventory and patch management tool built with Flask, PostgreSQL, and a Windows agent. The server provides a web dashboard for monitoring installed software across machines, dispatching Chocolatey-based install/upgrade/uninstall jobs, running ad-hoc remote commands, pushing user notifications and scheduled restarts, and self-updating the agent fleet. The agent runs as a Windows service on each managed machine, collects inventory, executes jobs posted by the dashboard, and shows notification popups to the logged-in user.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│          Web Dashboard              │
-│        (Flask + PostgreSQL)         │
-│                                     │
-│  • Inventory view                   │
-│  • Job dispatch (install/upgrade/   │
-│    uninstall)                       │
-│  • Computer status                  │
-│  • Chocolatey version tracking      │
-│  • HTTPS with self-signed cert      │
-└────────────────┬────────────────────┘
-                 │ HTTPS + API key
+┌──────────────────────────────────────────────────┐
+│                  Web Dashboard                   │
+│         (Flask + Waitress + PostgreSQL)          │
+│                                                  │
+│  • Inventory view + Chocolatey version tracking  │
+│  • Inventory Actions (bulk select + upgrade)     │
+│  • Deploy (install packages, community/internal) │
+│  • Notifications & scheduled restarts            │
+│  • Remote commands (cmd / PowerShell /           │
+│    MSI uninstall / MSI GUID search)              │
+│  • Agent fleet management + self-update push     │
+│  • Job history, user management                  │
+│  • Session auth; served behind IIS +             │
+│    URL Rewrite (dev: HTTPS self-signed cert)     │
+└────────────────┬─────────────────────────────────┘
+                 │ HTTPS + per-agent token
                  │
-┌────────────────▼────────────────────┐
-│          Windows Agent              │
-│        (agent.exe via NSSM)         │
-│                                     │
-│  • Self-enrolls                     │
-│  • Polls for pending jobs           │
-│  • Collects registry software       │
-│  • Matches to Chocolatey packages   │
-│  • Reports inventory every 10 min   │
-│  • Auto-rotates token every 30 days │
-└─────────────────────────────────────┘
+┌────────────────▼─────────────────────────────────┐
+│                  Windows Agent                   │
+│        (compiled exe, run via NSSM service)      │
+│                                                  │
+│  • Self-enrolls, auto-rotates token (30 days)    │
+│  • Polls for pending jobs every 60s              │
+│  • Polls for notifications/restarts every 60s    │
+│  • Collects registry + Chocolatey software       │
+│  • Reports inventory every 10 min                │
+│  • Executes install/upgrade/uninstall,           │
+│    remote commands, and self-update jobs         │
+│  • Shows popups in the user's desktop session    │
+└──────────────────────────────────────────────────┘
 ```
-**Server:** Flask (Python), PostgreSQL, runs with a self-signed TLS certificate.  
-**Agent:** Compiled Python (`agent.exe`), installed as a Windows service via NSSM, communicates over HTTPS with certificate pinning and an API key.
+**Server:** Flask (Python) behind Waitress (and, in production, IIS with URL Rewrite in front of it), PostgreSQL backend. `app.py` can also be run standalone with a self-signed TLS cert via `generate_cert.py` for direct HTTPS testing.
+**Agent:** Compiled Python (PyInstaller), installed as a Windows service via NSSM, communicates over HTTPS with certificate pinning and a per-agent token. Internally referred to as `DMCPatchAgent`.
 
 ---
 
@@ -42,12 +48,23 @@ A lightweight Windows software inventory and patch management tool built with Fl
 
 | File | Description |
 |------|-------------|
-| `agent.py` | Windows agent — inventory collection, enrollment, job execution |
-| `app.py` | Flask API server |
-| `auth.py` | Authentication — session auth, per-agent token enrollment/revocation/rotation |
-| `dashboard.html` | Web UI — inventory browser, job management, user management |
-| `installer.iss` | Inno Setup installer script for the Windows agent |
-| `generate_cert.py` | Generates self-signed SSL certificate for the server |
+| `agent.py` | Windows agent — enrollment, inventory collection, job execution, notification polling, self-update trigger |
+| `app.py` | Flask app entrypoint — registers blueprints, session config, runs Waitress |
+| `auth.py` | Session auth (login/users/passwords) + per-agent token enrollment, verification, rotation, and revocation |
+| `db.py` | PostgreSQL connection pool (`psycopg2`) and the shared `query()` helper |
+| `routes/inventory.py` | `/api/inventory` ingestion + Chocolatey "latest version" lookup (internal share/feed with public fallback) |
+| `routes/jobs.py` | Job creation (single/bulk with staggered scheduling), listing, cancel/retry/delete, agent polling + result reporting |
+| `routes/computers.py` | Computer listing (with online/offline status) and deletion |
+| `routes/packages.py` | Managed package catalog (internal Chocolatey packages shown in the Deploy tab) |
+| `routes/config.py` | Server-side key/value config (e.g. `internal_source_url`) |
+| `routes/notifications.py` | Notification and scheduled-restart job creation, agent delivery polling, delay/acknowledge handling |
+| `routes/agent_update.py` | Serves the latest agent build for self-update, reports configured agent version |
+| `updater.py` | Standalone helper exe: stops the service, swaps in the newly downloaded agent build, restarts the service |
+| `notify_popup.py` | Tkinter popup shown in the user's desktop session for notifications/scheduled restarts |
+| `create_first_user.py` | One-time script to create the first dashboard admin user |
+| `generate_cert.py` | Generates a self-signed SSL certificate (for direct HTTPS / cert pinning) |
+| `templates/dashboard.html` | Web UI — Dashboard (inventory + Inventory Actions), Packages, Deploy, Notifications, Jobs, Settings/Users |
+| `installer.iss.example` | Inno Setup installer template for the Windows agent |
 
 ---
 
@@ -56,31 +73,33 @@ A lightweight Windows software inventory and patch management tool built with Fl
 ### Server
 - Python 3.10+
 - PostgreSQL 13+
-- The packages listed in `requirements.txt`
+- The packages listed in `requirements.txt` (Flask, psycopg2-binary, requests, python-dotenv, cryptography, pywin32, waitress, gunicorn, gevent)
+- In production: IIS with URL Rewrite in front of Waitress
 
 ### Agent (each managed Windows machine)
 - Tested on Windows 11 / Windows Server 2019
 - [Chocolatey](https://chocolatey.org/install) installed
 - [NSSM](https://nssm.cc/) (included in deployment package)
-- `agent.exe`, `server_cert.pem` deployed to `C:\ProgramData\Agent\` and agent.key generated during installation
+- Compiled agent exe + `server_cert.pem` deployed to the install directory (default `C:\ProgramData\<InstallSubDir>`), with `config.json` written by the installer and `agent.key` generated on first enrollment
 
 ---
 
 ## Server Setup
 
-### 1. Generate SSL certificate
+### 1. Clone and install dependencies
 ```bash
 git clone https://github.com/Hanis127/Software_Inventory.git
 cd Software_Inventory
 pip install -r requirements.txt
 ```
-### 2. Generate SSL certificate
+
+### 2. Generate a certificate for agent cert-pinning
 
 ```bash
 python generate_cert.py
 ```
 
-This produces `server_cert.pem` and `key.pem`. The cert includes a SubjectAlternativeName for your server IP — required for cert pinning on agents.
+This produces `server_cert.pem` and `key.pem`. The cert includes a SubjectAlternativeName for your server IP. `server_cert.pem` is what gets deployed to each agent for certificate pinning — see [Security](#security).
 
 ### 3. Configure environment
 
@@ -134,9 +153,9 @@ python create_first_user.py
 ```bash
 python app.py
 ```
-The dashboard is available at `https://<your-server-ip>:5000`.
+This runs Flask under Waitress on `http://0.0.0.0:5000` (plain HTTP, 16 threads). `app.py` does **not** load `server_cert.pem`/`key.pem` itself — that cert is only used for agent-side pinning.
 
-The server runs on HTTPS using `server_cert.pem` and `key.pem`.
+For production, put IIS with URL Rewrite in front of Waitress and terminate TLS at IIS, so the dashboard and agents talk to the server over HTTPS end-to-end (e.g. `https://<your-server-ip>/`). Running `python app.py` directly is convenient for local development/testing but exposes the dashboard over plain HTTP.
 
 ---
 
@@ -195,25 +214,40 @@ To change the name, edit the `#define` variables at the top of `installer.iss`:
 
 ---
 
+## Dashboard Features
+
+The web UI (`templates/dashboard.html`) is a single-page app with these tabs:
+
+- **Dashboard** — software inventory table (per-machine, filterable/sortable), computer status, and an **Inventory Actions** sub-tab for bulk workflows: select machines by online/offline status, by IP range, or by outdated/matching software, then dispatch a bulk `upgrade` job across the selection.
+- **Packages** — manage the internal package catalog used by the Deploy tab.
+- **Deploy** — install or upgrade a package (community Chocolatey or internal source) across one or more selected machines, with live progress polling per machine.
+- **Comman center** — send an immediate notification or schedule a restart across selected machines, with configurable urgency, delay options, and reminder milestones; view/cancel active notifications.
+- **Jobs** — paginated job history with status, output, retry, and delete/cleanup actions.
+- **Settings** — user management (add/remove users, change password), enrollment password lookup, internal source URL / other server config, and **agent management**: list enrolled agents with last-seen/version, revoke/un-revoke, and push an `agent_update` job to trigger a self-update.
+
+Each machine also has a detail panel with quick actions (run a one-off command/message/restart, or send a package to just that machine) and a remote command console supporting `cmd.exe`, PowerShell, MSI uninstall by GUID, and MSI GUID lookup by app name.
+
+---
+
 ## Agent Behavior
 
 ### First run — enrollment
 
-On startup, if no `agent.key` exists the agent calls `POST /api/enroll` with the hostname and enrollment password. The server generates a unique token, stores its hash in the database, and returns the raw token to the agent which saves it as `agent.key`.
+On startup, if no `agent.key` exists the agent calls `POST /api/enroll` with the hostname and enrollment password. The server generates a unique token, stores its hash in the database, and returns the raw token to the agent which saves it as `agent.key`. If the hostname is already enrolled but `agent.key` is missing locally, the agent automatically retries with `force=true` to re-enroll.
 
 ### Inventory collection
 
-Every **10 minutes** the agent collects:
-- Windows registry installed software
-- Chocolatey installed packages and outdated status
-- Nuspec metadata for package title matching
+Every **10 minutes** (`COLLECT_INTERVAL`) the agent:
+1. Fetches server-side config (`GET /api/config`) for the internal Chocolatey source URL
+2. Collects Windows registry installed software, installed Chocolatey packages, and nuspec metadata (`C:\ProgramData\chocolatey\lib\*\*.nuspec`) for title matching
+3. Posts the results to `POST /api/inventory`
 
-Results are sent to `POST /api/inventory`.
+The server then kicks off a background refresh of any stale `choco_id` "latest version" lookups (default cache freshness: 1 hour) — checking the internal source first (web feed or UNC share), falling back to the public Chocolatey community repository, and keeping whichever version is highest.
 
 ### Software matching
 
 The agent matches Windows registry entries to Chocolatey package IDs using:
-1. Nuspec title match (reads `C:\ProgramData\chocolatey\lib\*\*.nuspec`)
+1. Nuspec title match
 2. Exact ID match
 3. First-word match
 4. Substring match
@@ -222,18 +256,36 @@ Unmatched Chocolatey packages are added to inventory directly.
 
 ### Job polling
 
-Every **60 seconds** the agent polls `GET /api/jobs/pending` and executes any queued jobs (install, update, uninstall via Chocolatey).
+Every **60 seconds** (± up to 15s jitter) the agent polls `GET /api/jobs/pending/<hostname>` and executes any queued jobs.
+
+Supported `action` values:
+- `install`, `upgrade`, `uninstall` — via Chocolatey
+- `run_cmd`, `run_powershell` — arbitrary command/script execution (300s timeout)
+- `run_msi_uninstall` — `msiexec /x <GUID>`, GUID strictly validated against `{8-4-4-4-12}` format before use
+- `run_msi_guid_search` — looks up install GUIDs by display-name substring in the registry uninstall keys
+- `agent_update` — downloads the latest agent build and hands off to `updater.py` to swap it in and restart the service
 
 ### Job execution
 
-Jobs are validated before execution. `package_id` must match `[a-zA-Z0-9][a-zA-Z0-9._-]{0,198}[a-zA-Z0-9]`. `source_url` must be a UNC path (`\\server\share`) or an HTTP(S) URL. Jobs failing validation are rejected and reported back to the server without execution.
+Jobs are validated before execution. `package_id` must match `[a-zA-Z0-9][a-zA-Z0-9._-]{0,198}[a-zA-Z0-9]`. `source_url` must be a UNC path (`\\server\share`) or an HTTP(S) URL. Jobs failing validation are rejected and reported back to the server without execution. For `upgrade`/`install` jobs with a `source_url`, the agent combines the internal share (root of the given path) with the public Chocolatey community feed as a single `--source` argument.
 
-Supported actions: `install`, `upgrade`, `uninstall`.
+> **Known issue:** `choco upgrade` with a year-based internal version (e.g. `2026.x`) is treated by Chocolatey as newer than an older internal build numbered like `26.x`, which can cause upgrades to silently no-op. Fix under consideration: pass `--allow-downgrade` in `run_upgrade` whenever `source_url` is set.
 
+### Notifications & scheduled restarts
+
+Every **60 seconds** the agent also polls `GET /api/notify/pending/<hostname>` for due `notify` and `scheduled_restart` jobs. Popups are shown via `notify_popup.py`, launched in the active user's desktop session (the agent itself runs as a service in Session 0). Scheduled restarts support configurable reminder milestones (T-60/T-15/T-5 minutes) and a configurable number of user-initiated delays; user responses are reported back via `POST /api/notify/<job_id>/ack`.
+
+### Self-update
+
+The dashboard can push an `agent_update` job to one or more machines. The agent downloads the new build from `GET /api/agent/download`, saves it alongside the running exe, and launches the separate `updater.py` helper (since a running exe can't replace itself). The updater stops the NSSM service, renames the old exe to a backup, moves the new exe into place, and restarts the service.
 
 ### Token rotation
 
-Every **30 days** the agent automatically calls `POST /api/rotate-key` with its current token. The server issues a new token and immediately invalidates the old one. No reinstallation required.
+Every **30 days** (`KEY_ROTATION_DAYS`) the agent automatically calls `POST /api/rotate-key` with its current token. The server issues a new token and immediately invalidates the old one. No reinstallation required.
+
+### Known limitation — internal share access
+
+The Flask/Waitress service account typically does not have network share access, so server-side detection of internal Chocolatey repo versions from a share path (e.g. `\\server\ChocoPkgs`) can fail even though the path is reachable from managed machines. Verify the service account has read access to the share, or expose the internal feed over HTTP(S) instead.
 
 ---
 
@@ -255,32 +307,38 @@ The agent pins to the server's `server_cert.pem` file in its install directory. 
 
 The enrollment password is stored only in the server's `.env` file and the agent's `config.json`. It is not stored in the database. Changing it on the server prevents new enrollments without affecting agents already enrolled.
 
-### TLS The server runs with a self-signed certificate
-Certificate generated by `generate_cert.py`. The agent pins trust to this specific certificate — it will not communicate with any other server.
- 
+### TLS
+
+`generate_cert.py` produces the self-signed certificate the agent pins to (`server_cert.pem`) — the agent will not communicate with any other server or certificate. In production, TLS for the dashboard itself is expected to be terminated by IIS in front of Waitress; `app.py` alone serves plain HTTP and does not load `server_cert.pem`/`key.pem`.
+
 ### Session security
 Web sessions are protected by `FLASK_SECRET_KEY`, which must be set in `.env` and never committed to source control.
 
 ### Input validation
-The agent validates `package_id` and `source_url` against allowlist regexes before passing them to Chocolatey. The server stores jobs as submitted — ensure access to the dashboard is restricted to trusted administrators.
+The agent validates `package_id` and `source_url` against allowlist regexes before passing them to Chocolatey, and MSI uninstall GUIDs against a strict GUID pattern before calling `msiexec`. The server stores jobs as submitted — ensure access to the dashboard is restricted to trusted administrators, since the remote-command and MSI-uninstall job types execute arbitrary commands/scripts on managed machines.
 
 ### Disclaimer
-Internal deployment only:** This tool is designed for trusted internal networks. The agent API endpoints have no rate limiting. Do not expose the server to the public internet.
+**Internal deployment only:** This tool is designed for trusted internal networks. The agent API endpoints have no rate limiting. Do not expose the server to the public internet.
 
 
 ---
 
 ## API Endpoints
 
-### Agent endpoints (require valid agent token via `X-Agent-Key` header)
+Auth model: session cookie (dashboard) or per-agent token via `X-Agent-Key` (or `Authorization: Bearer <token>`) header. See `auth.py`'s `before_request` hook for exactly which paths require what.
+
+### Agent endpoints (per-agent token)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/inventory` | Submit inventory data |
-| `GET` | `/api/jobs/pending` | Poll for pending jobs |
-| `POST` | `/api/jobs/<id>/result` | Report job result |
-| `GET` | `/api/config` | Fetch server config (internal source URL etc.) |
+| `POST` | `/api/inventory` | Submit inventory data (also accepts a valid session) |
+| `GET` | `/api/jobs/pending/<hostname>` | Poll for this agent's pending Chocolatey/command jobs |
+| `PATCH` | `/api/jobs/<id>` | Report job status/output (`running`/`done`/`failed`) |
+| `GET` | `/api/notify/pending/<hostname>` | Poll for due notifications / scheduled restarts |
+| `POST` | `/api/notify/<job_id>/ack` | Report notification result (confirmed/delay/do_restart) |
+| `GET` | `/api/config` | Fetch server config (internal source URL etc.; also accepts a valid session) |
 | `POST` | `/api/rotate-key` | Rotate agent token |
+| `GET` | `/api/agent/download` | Download the latest agent build for self-update |
 
 ### Public endpoints
 
@@ -288,36 +346,48 @@ Internal deployment only:** This tool is designed for trusted internal networks.
 |--------|------|-------------|
 | `POST` | `/api/enroll` | Enroll a new agent (requires enrollment password) |
 
-### Dashboard endpoints (require session login)
+### Dashboard endpoints (require session login unless noted)
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/computers` | List all computers and online status |
-| `GET` | `/api/inventory` | Full software inventory across all machines |
+| `GET` | `/api/computers` | List all computers and online/offline status |
+| `DELETE` | `/api/computers/<hostname>` | Delete a computer and its jobs/software |
+| `GET` | `/api/inventory` | Full software inventory across all machines, joined with cached Chocolatey latest versions |
 | `POST` | `/api/jobs` | Create a job for a single computer |
-| `POST` | `/api/jobs/bulk` | Create jobs for multiple computers |
-| `GET` | `/api/jobs` | List recent jobs (last 100) |
+| `POST` | `/api/jobs/bulk` | Create jobs for multiple computers, with optional `batch_size`/`batch_delay_seconds` staggering |
+| `GET` | `/api/jobs` | List recent jobs (filterable by `status`/`hostname`, default limit 100) |
 | `GET` | `/api/jobs/<job_id>` | Get a specific job |
-| `GET` | `/api/packages` | List managed packages |
-| `POST` | `/api/packages` | Add a managed package |
+| `DELETE` | `/api/jobs/<job_id>` | Delete a non-pending/non-running job |
+| `DELETE` | `/api/jobs/completed` | Bulk-delete done/failed/cancelled jobs |
+| `POST` | `/api/jobs/<job_id>/cancel` | Cancel a pending job |
+| `POST` | `/api/jobs/<job_id>/retry` | Re-queue a failed/cancelled job as a fresh copy |
+| `GET` | `/api/packages` | List managed (internal) packages |
+| `POST` | `/api/packages` | Add/update a managed package |
 | `DELETE` | `/api/packages/<id>` | Remove a managed package |
 | `GET` | `/api/config` | Get server config |
 | `POST` | `/api/config` | Update server config |
-| `POST` | `/api/choco/refresh` | Refresh Chocolatey version cache |
+| `POST` | `/api/choco/refresh` | Force-refresh cached Chocolatey versions for all known packages |
+| `GET` | `/api/choco/debug` | Dump the `choco_versions` cache table |
+| `POST` | `/api/notify` | Create a `notify` or `scheduled_restart` job for one or more computers |
+| `GET` | `/api/notify/active` | List pending/running notify + scheduled restart jobs |
+| `POST` | `/api/notify/<job_id>/cancel` | Cancel a notification/restart job |
+| `GET` | `/api/auth/agents` | List enrolled agents (hostname, token hint, last seen, revoked, agent version) |
+| `POST` | `/api/auth/agents/<hostname>/revoke` | Revoke an agent |
+| `POST` | `/api/auth/agents/<hostname>/unrevoke` | Un-revoke an agent |
+| `GET` | `/api/auth/enrollment-password` | Retrieve the current enrollment password |
+| `GET` | `/api/agent/version` | Get the configured "latest" agent version and whether the exe is present on disk |
 
-### Auth endpoints (public)
+### Auth endpoints (public unless noted)
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/auth/login` | Log in |
 | `POST` | `/api/auth/logout` | Log out |
 | `GET` | `/api/auth/me` | Current session info |
-| `GET` | `/api/auth/users` | List users |
-| `POST` | `/api/auth/users` | Create user |
-| `DELETE` | `/api/auth/users/<id>` | Delete user |
-| `POST` | `/api/auth/change-password` | Change password |
-| `POST` | `/api/auth/generate-agent-key` | Generate new agent API key |
-| `GET` | `/api/auth/agent-key` | Retrieve current agent API key |
+| `GET` | `/api/auth/users` | List users (session required) |
+| `POST` | `/api/auth/users` | Create user (session required) |
+| `DELETE` | `/api/auth/users/<id>` | Delete user, not self (session required) |
+| `POST` | `/api/auth/change-password` | Change own password (session required) |
 
 ---
 
@@ -331,7 +401,7 @@ Internal deployment only:** This tool is designed for trusted internal networks.
 | `agent.log`       | Agent log file                                               |
 | `nssm.exe`        | Installs agent as a Windows service                          |
 
-All files live in the install directory (default `C:\ProgramData\Agent`).
+All files live in the install directory (default `C:\ProgramData\<InstallSubDir>`, e.g. `C:\ProgramData\DMCPatchAgent`). On self-update, `dmcpatchagent_new.exe` and, briefly, `dmcpatchagent_old.exe` also appear here, along with `updater.log` and `notify_popup.log` for troubleshooting those components.
 
 ---
 
@@ -357,3 +427,8 @@ All files live in the install directory (default `C:\ProgramData\Agent`).
 **Certificate errors**
 - Regenerate `server_cert.pem` with the correct server IP in the SAN field using `generate_cert.py`
 - Reinstall the agent so the new cert is copied and registered
+
+**`choco upgrade` reports success but doesn't actually update the package**
+- Likely the year-based internal version issue described in [Job execution](#job-execution): Chocolatey sees the currently-installed year-style version (e.g. `2026.x`) as newer than the internal repo's build-numbered version (e.g. `26.x`) and skips the upgrade
+- Check `agent.log` for the actual `choco upgrade` output/version comparison
+- Workaround under consideration: add `--allow-downgrade` in `run_upgrade` when `source_url` is set
