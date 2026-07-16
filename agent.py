@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.07.09"
+AGENT_VERSION = "2026.07.10"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -732,7 +732,7 @@ def poll_jobs():
                             "reboot required" in lower or
                             "restart required" in lower
                     ):
-                        status = "reboot_required"
+                        status = "reboot required"
                 api_patch(f"/api/jobs/{job['id']}", {
                     "status": status,
                     "output": output[-3000:]
@@ -772,7 +772,7 @@ def poll_jobs():
                         "reboot required" in lower or
                         "restart required" in lower
                 ):
-                    status = "reboot_required"
+                    status = "reboot required"
             api_patch(f"/api/jobs/{job['id']}", {
                 "status": status,
                 "output": output[-3000:]
