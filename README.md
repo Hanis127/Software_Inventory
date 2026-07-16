@@ -4,6 +4,20 @@ A lightweight Windows software inventory and patch management tool built with Fl
 
 ---
 
+## Features
+
+- **Automatic inventory collection** — agents scan the Windows registry and Chocolatey every 10 minutes and report back to the server
+- **Chocolatey version tracking** — server-side version checking against both the public Chocolatey community feed and your internal package repository
+- **Job-based deployment** — install, upgrade, or uninstall packages on any managed machine via the dashboard
+- **Bulk operations** — deploy to many machines at once with configurable batch sizes and staggered delays to avoid rate limits
+- **Inventory Actions** — filter computers by installed software, select targets, and dispatch jobs directly from the inventory view
+- **Notifications & scheduled restarts** — send popup notifications or schedule restarts with user delay options
+- **Run Command** — execute PowerShell scripts, CMD commands, MSI uninstalls, or GUID searches on managed machines
+- **Per-agent token auth** — each agent enrolls with a unique token (SHA-256 hashed in DB); tokens rotate automatically every 30 days
+- **Machine detail panel** — click any computer to see its full software inventory, active jobs, job history, and active notifications
+- **Agent auto-update** — push new agent builds from the dashboard
+---
+
 ## Architecture
 
 ```
@@ -146,9 +160,25 @@ CREATE TABLE enrollment_tokens (
 
 ```bash
 python create_first_user.py
+
+```
+### 6. Configure IIS
+
+- Create a site pointing to the project directory
+- Add URL Rewrite rule to proxy all traffic to `localhost:5000`
+- Run `app.py` as a Windows service (e.g. via NSSM) under a domain account that has read access to your internal Chocolatey share
+
+### 7. Configure internal package repository (optional)
+
+In the dashboard under Settings → Config, set `internal_source_url` to your UNC path or HTTP feed:
+
+```
+\\SERVER\ChocoPkgs
 ```
 
-### 6. Start the server
+Packages should be organised in subfolders: `\\SERVER\ChocoPkgs\<package-id>\<package-id>.<version>.nupkg`
+
+### 8. Start the server
 
 ```bash
 python app.py
@@ -231,6 +261,13 @@ Each machine also has a detail panel with quick actions (run a one-off command/m
 
 ## Agent Behavior
 
+| Interval | Action |
+|----------|--------|
+| Every 10 min | Collect registry software + choco list, send to server |
+| Every 60 sec | Poll for pending jobs, execute via Chocolatey/PowerShell/msiexec |
+| Every 60 sec | Poll for pending notifications, launch popup in user session |
+| Every 30 days | Rotate agent token automatically |
+
 ### First run — enrollment
 
 On startup, if no `agent.key` exists the agent calls `POST /api/enroll` with the hostname and enrollment password. The server generates a unique token, stores its hash in the database, and returns the raw token to the agent which saves it as `agent.key`. If the hostname is already enrolled but `agent.key` is missing locally, the agent automatically retries with `force=true` to re-enroll.
@@ -289,11 +326,98 @@ The Flask/Waitress service account typically does not have network share access,
 
 ---
 
+## Dashboard Overview
+
+### Packages → Inventory
+
+Full software inventory table across all machines. Columns:
+
+- **Computer** — hostname with online/offline indicator
+- **IP Address**
+- **Software** — display name from Windows registry
+- **Installed** — version from registry
+- **Latest in Env** — highest version seen across all managed machines
+- **Latest (Choco)** — version from Chocolatey community feed or your internal repo (whichever is newer)
+- **Status** — Up to date / Outdated / Unknown
+- **Publisher**, **Install Date**
+- **Action** — inline Update / Uninstall buttons
+
+### Packages → Inventory Actions
+
+Software-first bulk deployment workflow:
+
+1. **Filter** by installed software (optional) — or show all onboarded computers
+2. **Select computers** — with shortcuts for "Outdated only", "Online only", VLAN filters
+3. **Pick target package** — from Chocolatey community (type any package ID + optional version) or from your internal package list
+4. **Dispatch** — Install / Upgrade / Uninstall with configurable batch size and delay between batches
+
+### Deploy
+
+- **Internal Packages** — manage your curated internal package list, deploy to selected computers
+- **Community (Chocolatey)** — deploy any Chocolatey community package by ID
+
+### Notifications & Commands
+
+- **Send Message** — popup notification to selected computers with urgency level and user delay options
+- **Schedule Restart** — scheduled restart with T-60/T-15/T-5 reminders and user delay options
+- **Run Command** — execute on selected computers:
+  - PowerShell script
+  - CMD script
+  - MSI Uninstall (by GUID)
+  - MSI GUID Search (by app name)
+
+### Jobs
+
+Full job history with status (pending / running / done / failed / cancelled). Per-job actions: Cancel, Delete, Retry.
+
+### Settings
+
+- User management (add/remove dashboard users)
+- Change password
+- Enrollment password display
+- Enrolled agents list with version tracking and per-agent revoke/update
+
+---
+
+## Bulk Deployment & Rate Limiting
+
+When deploying to many machines simultaneously, all agents would hit Chocolatey's community feed at the same time, triggering the 20 requests/minute rate limit (1 hour IP block if exceeded).
+
+DMCPatch staggers bulk jobs using a `scheduled_at` column on the `jobs` table:
+
+- Default batch size: **10 machines**
+- Default delay between batches: **90 seconds**
+
+Both are configurable per-dispatch from the Inventory Actions panel.
+
+---
+
+## Internal Package Repository
+
+DMCPatch supports a Windows file share as an internal Chocolatey source. Packages must follow this structure:
+
+```
+\\SERVER\ChocoPkgs\
+    adobereader\
+        adobereader.2026.1.21691.nupkg
+    vlc\
+        vnc-viewer.8.4.2.nupkg
+    googlechrome\
+        googlechrome.150.0.7871.47.nupkg
+```
+
+The server queries the share (requires the Flask service to run under a domain account with share access) to determine the latest available version and compares it against the community feed, preferring the internal version if found.
+
+When dispatching install/upgrade jobs for internal packages, the source URL is automatically set to the package subfolder (e.g. `\\SERVER\ChocoPkgs\adobereader`) so Chocolatey finds the nupkg directly.
+
+---
+
 ## Security
 
 ### Per-agent tokens
 
 Every agent has a unique token. Compromise of one machine does not affect others. Tokens are stored as SHA-256 hashes in the database — the raw token only ever exists on the agent.
+Token hints (first 8 chars) stored for admin identification
 
 ### Revocation
 
@@ -312,7 +436,7 @@ The enrollment password is stored only in the server's `.env` file and the agent
 `generate_cert.py` produces the self-signed certificate the agent pins to (`server_cert.pem`) — the agent will not communicate with any other server or certificate. In production, TLS for the dashboard itself is expected to be terminated by IIS in front of Waitress; `app.py` alone serves plain HTTP and does not load `server_cert.pem`/`key.pem`.
 
 ### Session security
-Web sessions are protected by `FLASK_SECRET_KEY`, which must be set in `.env` and never committed to source control.
+Web sessions are protected by `FLASK_SECRET_KEY`, which must be set in `.env` and never committed to source control. (8-hour sessions)
 
 ### Input validation
 The agent validates `package_id` and `source_url` against allowlist regexes before passing them to Chocolatey, and MSI uninstall GUIDs against a strict GUID pattern before calling `msiexec`. The server stores jobs as submitted — ensure access to the dashboard is restricted to trusted administrators, since the remote-command and MSI-uninstall job types execute arbitrary commands/scripts on managed machines.
