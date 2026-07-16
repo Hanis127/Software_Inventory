@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.07.08"
+AGENT_VERSION = "2026.07.09"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -724,6 +724,15 @@ def poll_jobs():
                     success, output = run_agent_update()
 
                 status = "done" if success else "failed"
+                if not success:
+                    lower = output.lower()
+                    if (
+                            "3010" in lower or
+                            "1641" in lower or
+                            "reboot required" in lower or
+                            "restart required" in lower
+                    ):
+                        status = "reboot_required"
                 api_patch(f"/api/jobs/{job['id']}", {
                     "status": status,
                     "output": output[-3000:]
@@ -755,6 +764,15 @@ def poll_jobs():
                 success, output = run_upgrade(package_id, source_url, install_args, package_params)
 
             status = "done" if success else "failed"
+            if not success:
+                lower = output.lower()
+                if (
+                        "3010" in lower or
+                        "1641" in lower or
+                        "reboot required" in lower or
+                        "restart required" in lower
+                ):
+                    status = "reboot_required"
             api_patch(f"/api/jobs/{job['id']}", {
                 "status": status,
                 "output": output[-3000:]
@@ -1031,7 +1049,7 @@ def main():
     if should_rotate():
         rotate_token()
 
-    # time.sleep(random.uniform(0, 300)) / I think sleep is unnecessary after adding the waitress
+    time.sleep(random.uniform(0, 30)) # Adding random sleep time to lower the amount of requests during bulk update
 
     while True:
         now = time.time()

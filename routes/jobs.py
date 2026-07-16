@@ -87,7 +87,7 @@ def delete_job(job_id):
     row = query("SELECT id, status FROM jobs WHERE id = %s", (job_id,), fetch='one')
     if not row:
         return jsonify({'error': 'Job not found'}), 404
-    if row['status'] in ('pending', 'running'):
+    if row['status'] in ('reboot', 'pending', 'running'):
         return jsonify({'error': 'Cannot delete a pending or running job — cancel it first'}), 400
     query("DELETE FROM jobs WHERE id = %s", (job_id,))
     return jsonify({'ok': True})

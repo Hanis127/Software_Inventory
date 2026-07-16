@@ -1102,6 +1102,7 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
           <option value="running">Running</option>
           <option value="done">Done</option>
           <option value="failed">Failed</option>
+          <option value="reboot required">Reboot</option>
           <option value="cancelled">Cancelled</option>
         </select>
         <select id="jobPageSize" onchange="jobsGoToPage(1)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none">
@@ -1163,6 +1164,7 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
           <div class="card-header">
             <span class="card-title">Enrolled Agents - 0-300s random poll interval</span>
             <span style="font-size:11px;color:var(--text2);font-family:var(--mono);margin-left:auto">Latest: <span id="latestAgentVersionDisplay" style="color:var(--accent)">—</span></span>
+            <button onclick="updateAllAgents()" class="btn btn-ghost" style="font-size:11px;background:transparent;border:1px solid var(--warn);color:var(--warn);border-radius:3px;cursor:pointer;white-space:nowrap;margin-left:4px">↑ Update All Agents</button>
             <button onclick="loadAgents()" class="btn btn-ghost" style="font-size:11px;margin-left:8px">↻ Refresh</button>
           </div>
           <div class="card-body">
@@ -1286,6 +1288,7 @@ var allJobs             = [];
 var allInternalPackages = [];
 var serverConfig        = {};
 var latestAgentVersion  = null;
+let allAgents = [];
 var envLatestMap        = new Map();
 var selectedComputers   = new Set();
 var selectedSoftware    = new Set();
@@ -2211,7 +2214,7 @@ function renderJobHistory() {
       outputCell.textContent = '\u2014';
     }
     // Cancel button for pending jobs only
-    if (job.status === 'pending') {
+    if (job.status === 'pending' || job.status === 'running') {
       var cancelBtn = document.createElement('button');
       cancelBtn.className = 'job-cancel-btn';
       cancelBtn.textContent = 'Cancel';
@@ -2609,6 +2612,40 @@ async function loadEnrollmentPassword() {
   document.getElementById('enrollmentPwDisplay').textContent = data.password || data.message || 'Not set';
 }
 
+async function updateAllAgents() {
+    const targets = allAgents.filter(a =>
+        !a.revoked &&
+        a.agent_version &&
+        latestAgentVersion &&
+        a.agent_version !== latestAgentVersion
+    );
+
+    if (!targets.length) {
+        alert("All agents are already up to date.");
+        return;
+    }
+
+    if (!confirm(`Queue agent update for ${targets.length} computers?`)) {
+        return;
+    }
+
+    for (const a of targets) {
+        await fetch('/api/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                computer: a.hostname,
+                package_id: 'agent_update',
+                display_name: 'Agent Update',
+                action: 'agent_update'
+            })
+        });
+    }
+
+    loadJobs();
+    alert(`Queued ${targets.length} agent updates.`);
+}
+
 async function loadAgents() {
   // Fetch the server's "latest" agent version for comparison
   try {
@@ -2623,14 +2660,15 @@ async function loadAgents() {
   } catch(e) { console.error('agent version', e); }
 
   const res   = await fetch('/api/auth/agents');
-  const agents = await res.json();
+  //const agents = await res.json();
+  allAgents = await res.json();
   const el    = document.getElementById('agentsList');
-  if (!agents.length) {
+  if (!allAgents.length) {
     el.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:8px 0">No enrolled agents.</div>';
     return;
   }
   el.innerHTML = '';
-  agents.forEach(function(a) {
+  allAgents.forEach(function(a) {
     var row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-bottom:6px;gap:10px';
 
