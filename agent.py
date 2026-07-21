@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 # ── Version ─────────────────────────────────────────────────────────────────
-AGENT_VERSION = "2026.07.10"
+AGENT_VERSION = "2026.07.13"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # config.json is written by the installer and lives next to the exe.
@@ -526,14 +526,15 @@ def validate_source_url(url):
 def run_upgrade(package_id, source_url=None, install_args=None, package_params=None):
     try:
         if source_url:
-            # Use root of share for combined source (Chocolatey searches subfolders)
-            # Strip the package subfolder that was appended by the dashboard
-            import re
+            # Use root of share (Chocolatey searches subfolders) — strip the
+            # package subfolder that was appended by the dashboard.
             root_url = re.sub(r'\\[^\\]+$', '', source_url) if source_url.startswith('\\\\') else source_url
-            combined = f"{root_url};https://community.chocolatey.org/api/v2/"
-            log(f"Running: choco upgrade {package_id} --source <internal+community>")
+            # Do NOT fall back to the community repo here: if the user picked a
+            # local package source, that's the version they want installed,
+            # even if community has a newer (possibly not-yet-vetted) release.
+            log(f"Running: choco upgrade {package_id} --source {root_url}")
             cmd = ["choco", "upgrade", package_id, "-y", "--no-progress",
-                   "--source", combined]
+                   "--source", root_url]
         else:
             log(f"Running: choco upgrade {package_id}")
             cmd = ["choco", "upgrade", package_id, "-y", "--no-progress"]
@@ -724,8 +725,9 @@ def poll_jobs():
                     success, output = run_agent_update()
 
                 status = "done" if success else "failed"
+                clean_output = (output or "").replace("\x00", "")
                 if not success:
-                    lower = output.lower()
+                    lower = clean_output.lower()
                     if (
                             "3010" in lower or
                             "1641" in lower or
@@ -735,7 +737,7 @@ def poll_jobs():
                         status = "reboot required"
                 api_patch(f"/api/jobs/{job['id']}", {
                     "status": status,
-                    "output": output[-3000:]
+                    "output": clean_output[-3000:]
                 })
                 log(f"Job {job['id']} finished: {status}")
                 continue  # Skip standard chocolatey logic checks below
@@ -764,8 +766,9 @@ def poll_jobs():
                 success, output = run_upgrade(package_id, source_url, install_args, package_params)
 
             status = "done" if success else "failed"
+            clean_output = (output or "").replace("\x00", "")
             if not success:
-                lower = output.lower()
+                lower = clean_output.lower()
                 if (
                         "3010" in lower or
                         "1641" in lower or
@@ -775,7 +778,7 @@ def poll_jobs():
                     status = "reboot required"
             api_patch(f"/api/jobs/{job['id']}", {
                 "status": status,
-                "output": output[-3000:]
+                "output": clean_output[-3000:]
             })
             log(f"Job {job['id']} finished: {status}")
     except Exception as e:
