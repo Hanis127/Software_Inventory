@@ -605,6 +605,9 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
     <button class="nav-tab" onclick="showPage('jobs',this)" id="tab-jobs">
       ≡ Jobs <span class="badge" id="navJobsBadge" style="display:none"></span>
     </button>
+    <button class="nav-tab" onclick="showPage('reports',this)" id="tab-reports">
+      ▤ Reporting
+    </button>
     <button class="nav-tab" onclick="showPage('settings',this)" id="tab-settings">
       ⚙ Settings
     </button>
@@ -1119,6 +1122,138 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
       <div id="jobHistoryContent"><div class="empty">No jobs yet.</div></div>
     </div>
 
+    <!-- ── Reporting ──────────────────────────────────────────────────────── -->
+    <div class="page" id="page-reports">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+
+        <!-- Software Compliance -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Software Compliance</span>
+            <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+              <select id="repComplianceOs" onchange="renderComplianceReport()" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none">
+                <option value="">All OS</option>
+              </select>
+              <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer">
+                <input type="checkbox" id="repComplianceChocoOnly" onchange="renderComplianceReport()"> Choco-managed only
+              </label>
+            </div>
+          </div>
+          <div class="card-body" style="display:flex;gap:20px;align-items:center">
+            <div style="width:150px;height:150px;flex-shrink:0"><canvas id="complianceChart"></canvas></div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:10px" id="complianceStats"></div>
+          </div>
+        </div>
+
+        <!-- Fleet Health -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Fleet Health</span>
+            <div style="margin-left:auto;display:flex;gap:10px;align-items:center">
+              <label style="font-size:11px;color:var(--text2);display:flex;align-items:center;gap:4px;cursor:pointer">
+                <input type="checkbox" id="repFleetOnlineOnly" onchange="renderFleetReport()"> Online only
+              </label>
+            </div>
+          </div>
+          <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:6px">OS Breakdown</div>
+              <canvas id="fleetOsChart"></canvas>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Time Since Last Reboot</div>
+              <canvas id="fleetUptimeChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Patch Deployment Success / Failure -->
+      <div class="card" style="margin-top:20px">
+        <div class="card-header">
+          <span class="card-title">Patch Deployment Success / Failure</span>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <input id="repJobHostname" placeholder="Computer…" oninput="debounceJobHistory()" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;width:120px">
+            <select id="repJobAction" onchange="loadJobHistoryReport()" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none">
+              <option value="">All actions</option>
+            </select>
+            <select id="repJobDays" onchange="loadJobHistoryReport()" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none">
+              <option value="7">Last 7 days</option>
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="stats-row" style="margin-bottom:16px">
+            <div class="stat-card">
+              <div class="stat-label">Total Jobs</div>
+              <div class="stat-value" id="repJobTotal">—</div>
+            </div>
+            <div class="stat-card ok">
+              <div class="stat-label">Success Rate</div>
+              <div class="stat-value ok" id="repJobSuccessRate">—</div>
+            </div>
+            <div class="stat-card warn">
+              <div class="stat-label">Failed</div>
+              <div class="stat-value warn" id="repJobFailed">—</div>
+            </div>
+          </div>
+          <canvas id="jobHistoryChart" height="70"></canvas>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px">
+
+        <!-- Top Outdated Computers -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Top Outdated Computers</span>
+            <input id="repTopCompSearch" placeholder="Search…" oninput="renderTopOutdatedComputers()" style="margin-left:auto;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;width:130px">
+          </div>
+          <div class="card-body" style="max-height:360px;overflow-y:auto">
+            <table>
+              <thead>
+                <tr>
+                  <th onclick="setSortTopComputers('hostname')">Computer</th>
+                  <th onclick="setSortTopComputers('os_version')">OS</th>
+                  <th onclick="setSortTopComputers('outdated')">Outdated</th>
+                  <th onclick="setSortTopComputers('total')">Total</th>
+                  <th onclick="setSortTopComputers('pct')">% Outdated</th>
+                </tr>
+              </thead>
+              <tbody id="repTopComputersBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Top Outdated Software -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Top Outdated Software</span>
+            <input id="repTopSwSearch" placeholder="Search…" oninput="renderTopOutdatedSoftware()" style="margin-left:auto;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none;width:130px">
+          </div>
+          <div class="card-body" style="max-height:360px;overflow-y:auto">
+            <table>
+              <thead>
+                <tr>
+                  <th onclick="setSortTopSoftware('display_name')">Software</th>
+                  <th onclick="setSortTopSoftware('publisher')">Publisher</th>
+                  <th onclick="setSortTopSoftware('installs')">Installs</th>
+                  <th onclick="setSortTopSoftware('outdated')">Outdated</th>
+                  <th onclick="setSortTopSoftware('pct')">% Outdated</th>
+                </tr>
+              </thead>
+              <tbody id="repTopSoftwareBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- ── Settings ───────────────────────────────────────────────────────── -->
     <div class="page" id="page-settings">
       <div class="settings-grid">
@@ -1256,6 +1391,7 @@ function showPage(name, btn) {
   if (name === 'settings') { loadUsers(); loadAgents(); }
   if (name === 'notifications') loadActiveNotifications();
   if (name === 'jobs') loadJobs();
+  if (name === 'reports') loadReportsPage();
 }
 
 function toggleDrawer() {
@@ -1515,6 +1651,332 @@ function getStatus(r) {
 }
 
 function isOutdated(r) { return getStatus(r).outdated; }
+
+// ── Reporting tab ───────────────────────────────────────────────────────────
+var complianceChart, fleetOsChart, fleetUptimeChart, jobHistoryChart;
+var topComputersSort  = { column: 'pct', direction: 'desc' };
+var topSoftwareSort   = { column: 'pct', direction: 'desc' };
+var reportActionsLoaded = false;
+var jobHistoryDebounce;
+
+function loadReportsPage() {
+  populateReportFilterOptions();
+  renderComplianceReport();
+  renderFleetReport();
+  renderTopOutdatedComputers();
+  renderTopOutdatedSoftware();
+  if (!reportActionsLoaded) loadJobActionsFilter();
+  loadJobHistoryReport();
+}
+
+function populateReportFilterOptions() {
+  var osSel = document.getElementById('repComplianceOs');
+  var current = osSel.value;
+  var osValues = Array.from(new Set(allComputers.map(function(c) { return c.os_version; }).filter(Boolean))).sort();
+  osSel.innerHTML = '<option value="">All OS</option>' +
+    osValues.map(function(v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+  osSel.value = current;
+}
+
+function loadJobActionsFilter() {
+  fetch('/api/reports/job-actions')
+    .then(function(r) { return r.json(); })
+    .then(function(actions) {
+      reportActionsLoaded = true;
+      var sel = document.getElementById('repJobAction');
+      sel.innerHTML = '<option value="">All actions</option>' +
+        actions.map(function(a) { return '<option value="' + a + '">' + a + '</option>'; }).join('');
+    })
+    .catch(function() {});
+}
+
+function reportStatLine(label, value, color) {
+  return '<div style="display:flex;justify-content:space-between;font-size:12px">' +
+    '<span style="color:var(--text2)">' + label + '</span>' +
+    '<span style="font-family:var(--mono);font-weight:600' + (color ? ';color:' + color : '') + '">' + value + '</span></div>';
+}
+
+// ── Software Compliance ──────────────────────────────────────────────────────
+function renderComplianceReport() {
+  var osFilter  = document.getElementById('repComplianceOs').value;
+  var chocoOnly = document.getElementById('repComplianceChocoOnly').checked;
+
+  var hostSet = null;
+  if (osFilter) {
+    hostSet = new Set(allComputers.filter(function(c) { return c.os_version === osFilter; })
+                                   .map(function(c) { return c.hostname; }));
+  }
+
+  var rows = allInventory.filter(function(r) {
+    if (hostSet && !hostSet.has(r.computer)) return false;
+    if (chocoOnly && !r.choco_id) return false;
+    return true;
+  });
+
+  var upToDate = 0, outdated = 0, unknown = 0;
+  rows.forEach(function(r) {
+    var s = getStatus(r);
+    if (s.outdated) outdated++;
+    else if (s.label === 'Unknown') unknown++;
+    else upToDate++;
+  });
+  var total        = rows.length;
+  var chocoManaged = rows.filter(function(r) { return !!r.choco_id; }).length;
+  var pct = function(n) { return total ? Math.round(n / total * 100) + '%' : '—'; };
+
+  var ctx = document.getElementById('complianceChart').getContext('2d');
+  if (complianceChart) complianceChart.destroy();
+  complianceChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Up to date', 'Outdated', 'Unknown'],
+      datasets: [{
+        data: [upToDate, outdated, unknown],
+        backgroundColor: ['rgba(34,197,94,0.7)', 'rgba(240,68,68,0.7)', 'rgba(100,116,139,0.5)'],
+        borderColor: ['#22c55e', '#f04444', '#64748b'],
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { color: '#a0aabf', font: { family: 'IBM Plex Mono', size: 10 }, boxWidth: 10 } } }
+    }
+  });
+
+  document.getElementById('complianceStats').innerHTML =
+    reportStatLine('Installs (filtered)', total) +
+    reportStatLine('Outdated', outdated + ' (' + pct(outdated) + ')', 'var(--danger)') +
+    reportStatLine('Choco-managed', chocoManaged + ' (' + pct(chocoManaged) + ')', 'var(--accent)') +
+    reportStatLine('Unmanaged / Unknown', unknown + ' (' + pct(unknown) + ')', 'var(--muted)');
+}
+
+// ── Fleet Health ──────────────────────────────────────────────────────────────
+function renderFleetReport() {
+  var onlineOnly = document.getElementById('repFleetOnlineOnly').checked;
+  var computers  = onlineOnly ? allComputers.filter(function(c) { return c.status === 'online'; }) : allComputers;
+
+  var osGroups = {};
+  computers.forEach(function(c) {
+    var os = c.os_version || 'Unknown';
+    osGroups[os] = (osGroups[os] || 0) + 1;
+  });
+  var osSorted = Object.entries(osGroups).sort(function(a, b) { return b[1] - a[1]; }).slice(0, 8);
+
+  var ctx1 = document.getElementById('fleetOsChart').getContext('2d');
+  if (fleetOsChart) fleetOsChart.destroy();
+  fleetOsChart = new Chart(ctx1, {
+    type: 'bar',
+    data: {
+      labels: osSorted.map(function(e) { return e[0]; }),
+      datasets: [{
+        label: 'Computers', data: osSorted.map(function(e) { return e[1]; }),
+        backgroundColor: 'rgba(79,142,247,0.35)', borderColor: 'rgba(79,142,247,0.9)',
+        borderWidth: 1, borderRadius: 3
+      }]
+    },
+    options: {
+      responsive: true, indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#262b38' } },
+        y: { ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 9 } }, grid: { display: false } }
+      }
+    }
+  });
+
+  var now = new Date();
+  var buckets = { '< 1 day': 0, '1–7 days': 0, '7–30 days': 0, '> 30 days': 0, 'Unknown': 0 };
+  computers.forEach(function(c) {
+    if (!c.last_boot_time) { buckets['Unknown']++; return; }
+    var days = (now - new Date(c.last_boot_time)) / 86400000;
+    if (days < 1) buckets['< 1 day']++;
+    else if (days < 7) buckets['1–7 days']++;
+    else if (days < 30) buckets['7–30 days']++;
+    else buckets['> 30 days']++;
+  });
+
+  var ctx2 = document.getElementById('fleetUptimeChart').getContext('2d');
+  if (fleetUptimeChart) fleetUptimeChart.destroy();
+  fleetUptimeChart = new Chart(ctx2, {
+    type: 'bar',
+    data: {
+      labels: Object.keys(buckets),
+      datasets: [{
+        label: 'Computers', data: Object.values(buckets),
+        backgroundColor: 'rgba(0,212,170,0.3)', borderColor: 'rgba(0,212,170,0.9)',
+        borderWidth: 1, borderRadius: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 9 }, maxRotation: 20 }, grid: { display: false } },
+        y: { ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#262b38' } }
+      }
+    }
+  });
+}
+
+// ── Top Outdated Computers ────────────────────────────────────────────────────
+function setSortTopComputers(col) {
+  if (topComputersSort.column === col) topComputersSort.direction = topComputersSort.direction === 'asc' ? 'desc' : 'asc';
+  else { topComputersSort.column = col; topComputersSort.direction = 'desc'; }
+  renderTopOutdatedComputers();
+}
+
+function renderTopOutdatedComputers() {
+  var search = (document.getElementById('repTopCompSearch').value || '').toLowerCase();
+
+  var byComputer = {};
+  allInventory.forEach(function(r) {
+    if (!byComputer[r.computer]) byComputer[r.computer] = { outdated: 0, total: 0 };
+    byComputer[r.computer].total++;
+    if (getStatus(r).outdated) byComputer[r.computer].outdated++;
+  });
+
+  var compMeta = {};
+  allComputers.forEach(function(c) { compMeta[c.hostname] = c; });
+
+  var rows = Object.keys(byComputer)
+    .map(function(host) {
+      var d = byComputer[host];
+      return {
+        hostname:   host,
+        os_version: (compMeta[host] && compMeta[host].os_version) || 'Unknown',
+        outdated:   d.outdated,
+        total:      d.total,
+        pct:        d.total ? Math.round(d.outdated / d.total * 100) : 0
+      };
+    })
+    .filter(function(r) { return r.outdated > 0 && r.hostname.toLowerCase().indexOf(search) !== -1; });
+
+  var col = topComputersSort.column, dir = topComputersSort.direction;
+  rows.sort(function(a, b) {
+    var va = a[col], vb = b[col];
+    if (typeof va === 'string') return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    return dir === 'asc' ? va - vb : vb - va;
+  });
+  rows = rows.slice(0, 25);
+
+  var tbody = document.getElementById('repTopComputersBody');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty">No outdated software found</div></td></tr>'; return; }
+  tbody.innerHTML = rows.map(function(r) {
+    return '<tr><td>' + r.hostname + '</td><td>' + r.os_version + '</td>' +
+      '<td style="color:var(--danger)">' + r.outdated + '</td><td>' + r.total + '</td>' +
+      '<td>' + r.pct + '%</td></tr>';
+  }).join('');
+}
+
+// ── Top Outdated Software ─────────────────────────────────────────────────────
+function setSortTopSoftware(col) {
+  if (topSoftwareSort.column === col) topSoftwareSort.direction = topSoftwareSort.direction === 'asc' ? 'desc' : 'asc';
+  else { topSoftwareSort.column = col; topSoftwareSort.direction = 'desc'; }
+  renderTopOutdatedSoftware();
+}
+
+function renderTopOutdatedSoftware() {
+  var search = (document.getElementById('repTopSwSearch').value || '').toLowerCase();
+
+  var bySoftware = {};
+  allInventory.forEach(function(r) {
+    var key = r.display_name || 'Unknown';
+    if (!bySoftware[key]) bySoftware[key] = { installs: 0, outdated: 0, publisher: r.publisher || '' };
+    bySoftware[key].installs++;
+    if (getStatus(r).outdated) bySoftware[key].outdated++;
+  });
+
+  var rows = Object.keys(bySoftware)
+    .map(function(name) {
+      var d = bySoftware[name];
+      return {
+        display_name: name,
+        publisher:    d.publisher,
+        installs:     d.installs,
+        outdated:     d.outdated,
+        pct:          d.installs ? Math.round(d.outdated / d.installs * 100) : 0
+      };
+    })
+    .filter(function(r) { return r.outdated > 0 && r.display_name.toLowerCase().indexOf(search) !== -1; });
+
+  var col = topSoftwareSort.column, dir = topSoftwareSort.direction;
+  rows.sort(function(a, b) {
+    var va = a[col], vb = b[col];
+    if (typeof va === 'string') return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    return dir === 'asc' ? va - vb : vb - va;
+  });
+  rows = rows.slice(0, 25);
+
+  var tbody = document.getElementById('repTopSoftwareBody');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty">No outdated software found</div></td></tr>'; return; }
+  tbody.innerHTML = rows.map(function(r) {
+    return '<tr><td>' + r.display_name + '</td><td>' + r.publisher + '</td>' +
+      '<td>' + r.installs + '</td><td style="color:var(--danger)">' + r.outdated + '</td>' +
+      '<td>' + r.pct + '%</td></tr>';
+  }).join('');
+}
+
+// ── Patch Deployment Success / Failure ────────────────────────────────────────
+function debounceJobHistory() {
+  clearTimeout(jobHistoryDebounce);
+  jobHistoryDebounce = setTimeout(loadJobHistoryReport, 400);
+}
+
+function loadJobHistoryReport() {
+  var days     = document.getElementById('repJobDays').value;
+  var action   = document.getElementById('repJobAction').value;
+  var hostname = document.getElementById('repJobHostname').value.trim();
+
+  var params = new URLSearchParams({ days: days });
+  if (action)   params.set('action', action);
+  if (hostname) params.set('hostname', hostname);
+
+  fetch('/api/reports/job-history?' + params.toString())
+    .then(function(r) { return r.json(); })
+    .then(renderJobHistoryReport)
+    .catch(function() { renderJobHistoryReport([]); });
+}
+
+function renderJobHistoryReport(rows) {
+  var byDay  = {};
+  var totals = { done: 0, failed: 0, cancelled: 0, pending: 0, running: 0, reboot: 0 };
+
+  rows.forEach(function(r) {
+    if (!byDay[r.day]) byDay[r.day] = { done: 0, failed: 0, cancelled: 0, pending: 0, running: 0, reboot: 0 };
+    byDay[r.day][r.status] = (byDay[r.day][r.status] || 0) + r.count;
+    totals[r.status] = (totals[r.status] || 0) + r.count;
+  });
+
+  var days  = Object.keys(byDay).sort();
+  var total = Object.values(totals).reduce(function(a, b) { return a + b; }, 0);
+  var successRate = total ? Math.round(((totals.done || 0) / total) * 100) : 0;
+
+  document.getElementById('repJobTotal').textContent       = total;
+  document.getElementById('repJobSuccessRate').textContent = total ? successRate + '%' : '—';
+  document.getElementById('repJobFailed').textContent      = totals.failed || 0;
+
+  var ctx = document.getElementById('jobHistoryChart').getContext('2d');
+  if (jobHistoryChart) jobHistoryChart.destroy();
+  jobHistoryChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: days,
+      datasets: [
+        { label: 'Done',      data: days.map(function(d) { return byDay[d].done || 0; }),      backgroundColor: 'rgba(34,197,94,0.7)' },
+        { label: 'Failed',    data: days.map(function(d) { return byDay[d].failed || 0; }),    backgroundColor: 'rgba(240,68,68,0.7)' },
+        { label: 'Cancelled', data: days.map(function(d) { return byDay[d].cancelled || 0; }), backgroundColor: 'rgba(100,116,139,0.6)' }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { color: '#a0aabf', font: { family: 'IBM Plex Mono', size: 10 }, boxWidth: 10 } } },
+      scales: {
+        x: { stacked: true, ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 9 }, maxRotation: 45 }, grid: { display: false } },
+        y: { stacked: true, ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#262b38' } }
+      }
+    }
+  });
+}
 
 var pkgCurrentPage = 1;
 
