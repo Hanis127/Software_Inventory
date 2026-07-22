@@ -833,6 +833,7 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
                   <div style="width:1px;background:var(--border);margin:0 4px"></div>
                   <button class="btn btn-ghost" style="border-color:var(--accent2);color:var(--accent2)" onclick="invActOpenNotify()">✉ Send Notification</button>
                   <button class="btn btn-ghost" style="border-color:var(--warn);color:var(--warn)" onclick="invActOpenRestart()">↺ Schedule Restart</button>
+                  <button class="btn btn-ghost" style="border-color:var(--danger);color:var(--danger)" onclick="invActOpenCommand()">⚡ Run Command</button>
                 </div>
                 <div id="invActStatus" style="font-size:11px;font-family:var(--mono);color:var(--text2);min-height:16px"></div>
               </div>
@@ -1224,7 +1225,7 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
                   <th onclick="setSortTopComputers('pct')">% Outdated</th>
                 </tr>
               </thead>
-              <tbody id="repTopComputersBody"></tbody>
+              <tbody id="repTopComputersBody" onclick="handleTopComputerClick(event)"></tbody>
             </table>
           </div>
         </div>
@@ -1246,11 +1247,42 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
                   <th onclick="setSortTopSoftware('pct')">% Outdated</th>
                 </tr>
               </thead>
-              <tbody id="repTopSoftwareBody"></tbody>
+              <tbody id="repTopSoftwareBody" onclick="handleTopSoftwareClick(event)"></tbody>
             </table>
           </div>
         </div>
 
+      </div>
+
+      <!-- Job Status Changes -->
+      <div class="card" style="margin-top:20px">
+        <div class="card-header">
+          <span class="card-title">Job Status Changes</span>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+            <span style="font-size:11px;color:var(--text2)">Catches jobs that finished after their computer came back online</span>
+            <select id="repJobChangesHours" onchange="loadJobChangesReport()" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 6px;border-radius:4px;font-size:11px;font-family:var(--mono);outline:none">
+              <option value="24" selected>Last 24 hours</option>
+              <option value="48">Last 48 hours</option>
+              <option value="168">Last 7 days</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body" style="max-height:400px;overflow-y:auto">
+          <table>
+            <thead>
+              <tr>
+                <th onclick="setSortJobChanges('hostname')">Computer</th>
+                <th onclick="setSortJobChanges('display_name')">Job</th>
+                <th onclick="setSortJobChanges('action')">Action</th>
+                <th onclick="setSortJobChanges('status')">Status</th>
+                <th onclick="setSortJobChanges('created_at')">Queued</th>
+                <th onclick="setSortJobChanges('updated_at')">Completed</th>
+                <th onclick="setSortJobChanges('waited')">Waited</th>
+              </tr>
+            </thead>
+            <tbody id="repJobChangesBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -1321,6 +1353,22 @@ td { padding: 7px 10px; color: var(--text); vertical-align: middle; }
       <button class="modal-close" onclick="document.getElementById('outputModal').classList.remove('open')">✕</button>
     </div>
     <div class="modal-body"><pre id="modalContent"></pre></div>
+  </div>
+</div>
+
+<!-- ── Report drill-down modal ────────────────────────────────────────────── -->
+<div class="modal-overlay" id="reportDrillModal" onclick="closeReportDrillModal(event)">
+  <div class="modal" style="width:720px">
+    <div class="modal-header">
+      <span class="modal-title" id="reportDrillTitle">Details</span>
+      <button class="modal-close" onclick="document.getElementById('reportDrillModal').classList.remove('open')">✕</button>
+    </div>
+    <div class="modal-body">
+      <table>
+        <thead id="reportDrillHead"></thead>
+        <tbody id="reportDrillBody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -1652,8 +1700,16 @@ function getStatus(r) {
 
 function isOutdated(r) { return getStatus(r).outdated; }
 
+function reportLatestVersion(r, s) {
+  if (s.source === 'Env') return envLatestMap.get(r.display_name) || '—';
+  return r.choco_latest || envLatestMap.get(r.display_name) || '—';
+}
+
 // ── Reporting tab ───────────────────────────────────────────────────────────
 var complianceChart, fleetOsChart, fleetUptimeChart, jobHistoryChart;
+var fleetUptimeBuckets = {};
+var jobChangesSort = { column: 'updated_at', direction: 'desc' };
+var jobChangesData = [];
 var topComputersSort  = { column: 'pct', direction: 'desc' };
 var topSoftwareSort   = { column: 'pct', direction: 'desc' };
 var reportActionsLoaded = false;
@@ -1667,6 +1723,7 @@ function loadReportsPage() {
   renderTopOutdatedSoftware();
   if (!reportActionsLoaded) loadJobActionsFilter();
   loadJobHistoryReport();
+  loadJobChangesReport();
 }
 
 function populateReportFilterOptions() {
@@ -1694,6 +1751,28 @@ function reportStatLine(label, value, color) {
   return '<div style="display:flex;justify-content:space-between;font-size:12px">' +
     '<span style="color:var(--text2)">' + label + '</span>' +
     '<span style="font-family:var(--mono);font-weight:600' + (color ? ';color:' + color : '') + '">' + value + '</span></div>';
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Report drill-down modal ───────────────────────────────────────────────────
+function openReportDrill(title, headers, rows) {
+  document.getElementById('reportDrillTitle').textContent = title;
+  document.getElementById('reportDrillHead').innerHTML =
+    '<tr>' + headers.map(function(h) { return '<th>' + escapeHtml(h) + '</th>'; }).join('') + '</tr>';
+  document.getElementById('reportDrillBody').innerHTML = rows.length
+    ? rows.map(function(r) { return '<tr>' + r.map(function(c) { return '<td>' + c + '</td>'; }).join('') + '</tr>'; }).join('')
+    : '<tr><td colspan="' + headers.length + '"><div class="empty">No data</div></td></tr>';
+  document.getElementById('reportDrillModal').classList.add('open');
+}
+
+function closeReportDrillModal(e) {
+  if (e.target === document.getElementById('reportDrillModal'))
+    document.getElementById('reportDrillModal').classList.remove('open');
 }
 
 // ── Software Compliance ──────────────────────────────────────────────────────
@@ -1786,14 +1865,15 @@ function renderFleetReport() {
 
   var now = new Date();
   var buckets = { '< 1 day': 0, '1–7 days': 0, '7–30 days': 0, '> 30 days': 0, 'Unknown': 0 };
+  var bucketComputers = { '< 1 day': [], '1–7 days': [], '7–30 days': [], '> 30 days': [], 'Unknown': [] };
   computers.forEach(function(c) {
-    if (!c.last_boot_time) { buckets['Unknown']++; return; }
+    if (!c.last_boot_time) { buckets['Unknown']++; bucketComputers['Unknown'].push(c); return; }
     var days = (now - new Date(c.last_boot_time)) / 86400000;
-    if (days < 1) buckets['< 1 day']++;
-    else if (days < 7) buckets['1–7 days']++;
-    else if (days < 30) buckets['7–30 days']++;
-    else buckets['> 30 days']++;
+    var label = days < 1 ? '< 1 day' : days < 7 ? '1–7 days' : days < 30 ? '7–30 days' : '> 30 days';
+    buckets[label]++;
+    bucketComputers[label].push(c);
   });
+  fleetUptimeBuckets = bucketComputers;
 
   var ctx2 = document.getElementById('fleetUptimeChart').getContext('2d');
   if (fleetUptimeChart) fleetUptimeChart.destroy();
@@ -1809,6 +1889,14 @@ function renderFleetReport() {
     },
     options: {
       responsive: true,
+      onClick: function(evt, elements) {
+        if (!elements.length) return;
+        var label = fleetUptimeChart.data.labels[elements[0].index];
+        showBucketComputers(label);
+      },
+      onHover: function(evt, elements) {
+        evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+      },
       plugins: { legend: { display: false } },
       scales: {
         x: { ticks: { color: '#64748b', font: { family: 'IBM Plex Mono', size: 9 }, maxRotation: 20 }, grid: { display: false } },
@@ -1816,6 +1904,24 @@ function renderFleetReport() {
       }
     }
   });
+}
+
+function showBucketComputers(label) {
+  var computers = fleetUptimeBuckets[label] || [];
+  var rows = computers
+    .sort(function(a, b) { return a.hostname.localeCompare(b.hostname); })
+    .map(function(c) {
+      return [
+        escapeHtml(c.hostname),
+        escapeHtml(c.os_version || 'Unknown'),
+        c.status === 'online'
+          ? '<span class="status-dot dot-online"></span> Online'
+          : '<span class="status-dot dot-offline"></span> Offline',
+        c.last_boot_time ? formatUptime(c.last_boot_time) : 'Unknown'
+      ];
+    });
+  openReportDrill('Reboot bucket: ' + label + ' (' + computers.length + ' computers)',
+    ['Computer', 'OS', 'Status', 'Uptime'], rows);
 }
 
 // ── Top Outdated Computers ────────────────────────────────────────────────────
@@ -1862,10 +1968,34 @@ function renderTopOutdatedComputers() {
   var tbody = document.getElementById('repTopComputersBody');
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty">No outdated software found</div></td></tr>'; return; }
   tbody.innerHTML = rows.map(function(r) {
-    return '<tr><td>' + r.hostname + '</td><td>' + r.os_version + '</td>' +
+    return '<tr style="cursor:pointer" data-hostname="' + escapeHtml(r.hostname) + '">' +
+      '<td>' + escapeHtml(r.hostname) + '</td><td>' + escapeHtml(r.os_version) + '</td>' +
       '<td style="color:var(--danger)">' + r.outdated + '</td><td>' + r.total + '</td>' +
       '<td>' + r.pct + '%</td></tr>';
   }).join('');
+}
+
+function handleTopComputerClick(evt) {
+  var row = evt.target.closest('tr');
+  if (!row || !row.dataset.hostname) return;
+  showComputerOutdatedSoftware(row.dataset.hostname);
+}
+
+function showComputerOutdatedSoftware(hostname) {
+  var rows = allInventory
+    .filter(function(r) { return r.computer === hostname && getStatus(r).outdated; })
+    .sort(function(a, b) { return (a.display_name || '').localeCompare(b.display_name || ''); })
+    .map(function(r) {
+      var s = getStatus(r);
+      return [
+        escapeHtml(r.display_name || 'Unknown'),
+        escapeHtml(r.display_version || '—'),
+        escapeHtml(reportLatestVersion(r, s)),
+        escapeHtml(r.publisher || '—')
+      ];
+    });
+  openReportDrill('Outdated software on ' + escapeHtml(hostname) + ' (' + rows.length + ')',
+    ['Software', 'Installed', 'Latest', 'Publisher'], rows);
 }
 
 // ── Top Outdated Software ─────────────────────────────────────────────────────
@@ -1910,10 +2040,37 @@ function renderTopOutdatedSoftware() {
   var tbody = document.getElementById('repTopSoftwareBody');
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty">No outdated software found</div></td></tr>'; return; }
   tbody.innerHTML = rows.map(function(r) {
-    return '<tr><td>' + r.display_name + '</td><td>' + r.publisher + '</td>' +
+    return '<tr style="cursor:pointer" data-software="' + escapeHtml(r.display_name) + '">' +
+      '<td>' + escapeHtml(r.display_name) + '</td><td>' + escapeHtml(r.publisher) + '</td>' +
       '<td>' + r.installs + '</td><td style="color:var(--danger)">' + r.outdated + '</td>' +
       '<td>' + r.pct + '%</td></tr>';
   }).join('');
+}
+
+function handleTopSoftwareClick(evt) {
+  var row = evt.target.closest('tr');
+  if (!row || !row.dataset.software) return;
+  showSoftwareComputers(row.dataset.software);
+}
+
+function showSoftwareComputers(displayName) {
+  var rows = allInventory
+    .filter(function(r) { return r.display_name === displayName; })
+    .sort(function(a, b) { return (a.computer || '').localeCompare(b.computer || ''); })
+    .map(function(r) {
+      var s = getStatus(r);
+      var statusHtml = s.outdated
+        ? '<span class="badge badge-warn">Outdated</span>'
+        : (s.label === 'Unknown' ? '<span class="badge badge-muted">Unknown</span>' : '<span class="badge badge-ok">Up to date</span>');
+      return [
+        escapeHtml(r.computer),
+        escapeHtml(r.display_version || '—'),
+        escapeHtml(reportLatestVersion(r, s)),
+        statusHtml
+      ];
+    });
+  openReportDrill('Computers with ' + escapeHtml(displayName) + ' (' + rows.length + ')',
+    ['Computer', 'Installed', 'Latest', 'Status'], rows);
 }
 
 // ── Patch Deployment Success / Failure ────────────────────────────────────────
@@ -1978,7 +2135,66 @@ function renderJobHistoryReport(rows) {
   });
 }
 
-var pkgCurrentPage = 1;
+// ── Job Status Changes ────────────────────────────────────────────────────────
+function setSortJobChanges(col) {
+  if (jobChangesSort.column === col) jobChangesSort.direction = jobChangesSort.direction === 'asc' ? 'desc' : 'asc';
+  else { jobChangesSort.column = col; jobChangesSort.direction = 'desc'; }
+  renderJobChangesReport();
+}
+
+function loadJobChangesReport() {
+  var hours = document.getElementById('repJobChangesHours').value;
+  fetch('/api/reports/job-changes?hours=' + hours)
+    .then(function(r) { return r.json(); })
+    .then(function(rows) { jobChangesData = rows; renderJobChangesReport(); })
+    .catch(function() { jobChangesData = []; renderJobChangesReport(); });
+}
+
+function renderJobChangesReport() {
+  var rows = jobChangesData.map(function(j) {
+    var created = new Date(j.created_at);
+    var updated = new Date(j.updated_at);
+    return {
+      hostname:     j.hostname,
+      display_name: j.display_name || j.package_id || '—',
+      action:       j.action || 'upgrade',
+      status:       j.status,
+      created_at:   created,
+      updated_at:   updated,
+      waited:       updated - created
+    };
+  });
+
+  var col = jobChangesSort.column, dir = jobChangesSort.direction;
+  rows.sort(function(a, b) {
+    var va = a[col], vb = b[col];
+    if (va instanceof Date) { va = va.getTime(); vb = vb.getTime(); }
+    if (typeof va === 'string') return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    return dir === 'asc' ? va - vb : vb - va;
+  });
+
+  var tbody = document.getElementById('repJobChangesBody');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty">No job status changes in this window</div></td></tr>'; return; }
+
+  tbody.innerHTML = rows.map(function(r) {
+    var waitedMs = r.waited;
+    var waitedStr;
+    if (waitedMs < 60000) waitedStr = '< 1m';
+    else if (waitedMs < 3600000) waitedStr = Math.round(waitedMs / 60000) + 'm';
+    else if (waitedMs < 86400000) waitedStr = Math.round(waitedMs / 3600000) + 'h';
+    else waitedStr = Math.round(waitedMs / 86400000) + 'd';
+    var actionColor = r.action === 'uninstall' ? 'var(--danger)' : r.action === 'install' ? '#a855f7' : 'var(--accent)';
+    return '<tr>' +
+      '<td><span class="computer-pill" style="cursor:pointer" onclick="openMachineDetail(' + JSON.stringify(r.hostname || '') + ')">' + escapeHtml(r.hostname) + '</span></td>' +
+      '<td style="font-family:var(--mono);font-size:11px">' + escapeHtml(r.display_name) + '</td>' +
+      '<td><span style="color:' + actionColor + ';font-family:var(--mono);font-size:10px">' + escapeHtml(r.action) + '</span></td>' +
+      '<td><span class="job-row-status job-' + r.status + '">' + escapeHtml(r.status) + '</span></td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--muted)">' + r.created_at.toLocaleString() + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px;color:var(--muted)">' + r.updated_at.toLocaleString() + '</td>' +
+      '<td style="font-family:var(--mono);font-size:11px">' + waitedStr + '</td>' +
+      '</tr>';
+  }).join('');
+}
 
 function pkgGoToPage(page) {
   pkgCurrentPage = page;
@@ -4169,6 +4385,16 @@ function invActOpenRestart() {
   restartSelectedComputers.clear();
   computers.forEach(function(h){ restartSelectedComputers.add(h); });
   renderNotifyComputerList('restartComputerList', restartSelectedComputers);
+}
+
+function invActOpenCommand() {
+  if (!invActSelectedComputers.size) { alert('Select at least one computer first'); return; }
+  var computers = Array.from(invActSelectedComputers);
+  showPage('notifications', document.getElementById('tab-notifications'));
+  switchNotifyTab('command', document.querySelectorAll('#page-notifications .sub-tab')[2]);
+  commandSelectedComputers.clear();
+  computers.forEach(function(h){ commandSelectedComputers.add(h); });
+  renderNotifyComputerList('commandComputerList', commandSelectedComputers);
 }
 
 
