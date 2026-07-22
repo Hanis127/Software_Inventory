@@ -59,3 +59,25 @@ def job_actions():
         ORDER BY action
     """, (list(DEPLOYMENT_ACTIONS),), fetch='all')
     return jsonify([r['action'] for r in rows])
+
+
+@reports_bp.route('/api/reports/job-changes')
+@login_required
+def job_changes():
+    """Jobs whose status changed within the lookback window — this is keyed off
+    updated_at, not created_at, specifically so that a job queued yesterday
+    against an offline machine and completed this morning shows up here today."""
+    hours = min(int(request.args.get('hours', 24)), 24 * 30)
+
+    rows = query("""
+        SELECT j.id, j.action, j.display_name, j.package_id, j.status,
+               j.created_at, j.updated_at, c.hostname
+        FROM jobs j
+        JOIN computers c ON c.id = j.computer_id
+        WHERE j.updated_at >= NOW() - (%s || ' hours')::interval
+          AND j.status != 'pending'
+        ORDER BY j.updated_at DESC
+        LIMIT 500
+    """, (hours,), fetch='all')
+
+    return jsonify([dict(r) for r in rows])
