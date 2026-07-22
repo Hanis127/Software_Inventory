@@ -43,6 +43,19 @@ def receive_inventory():
                 """, (hostname, ip, os_ver, agent_version, last_boot_time))
                 computer_id = cur.fetchone()["id"]
 
+                # A job marked 'reboot required' is done once the machine has
+                # actually rebooted since that status was set. We already get
+                # last_boot_time on every scan, so piggyback on it here rather
+                # than adding a separate poll.
+                if last_boot_time:
+                    cur.execute("""
+                        UPDATE jobs
+                        SET status = 'done', updated_at = NOW()
+                        WHERE computer_id = %s
+                          AND status = 'reboot required'
+                          AND updated_at < %s
+                    """, (computer_id, last_boot_time))
+
                 # Replace software for this machine
                 cur.execute("DELETE FROM software WHERE computer_id = %s", (computer_id,))
 
